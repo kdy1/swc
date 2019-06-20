@@ -5,15 +5,16 @@ use crate::{
 use std::borrow::Cow;
 use swc_common::{Fold, FromVariant, Span, Spanned};
 use swc_ecma_ast::{
-    Bool, Class, Number, Str,  TsEnumDecl, TsFnParam, TsInterfaceDecl,
-     TsKeywordType, TsKeywordTypeKind, TsLit, TsLitType, TsModuleDecl,
-    TsNamespaceDecl, TsThisType, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeLit, TsTypeParamDecl,
+    Bool, Class, Number, Str, TsEnumDecl, TsFnParam, TsInterfaceDecl, TsKeywordType,
+    TsKeywordTypeKind, TsLit, TsLitType, TsModuleDecl, TsNamespaceDecl, TsThisType, TsType,
+    TsTypeAliasDecl, TsTypeAnn, TsTypeLit, TsTypeParamDecl,
 };
 
 pub(crate) type TypeRef<'a> = Cow<'a, Type>;
 
 #[derive(Debug, Fold, Clone, PartialEq, FromVariant, Spanned)]
 pub(crate) enum Type {
+    Lit(TsLitType),
     Keyword(TsKeywordType),
     Simple(TsType),
     Array(Array),

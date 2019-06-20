@@ -1,8 +1,6 @@
 use super::{control_flow::CondFacts, Analyzer, Name};
 use crate::ty::Type;
-
 use fxhash::FxHashMap;
-use std::borrow::Cow;
 use swc_atoms::JsWord;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
@@ -194,7 +192,7 @@ impl Analyzer<'_, '_> {
             span: DUMMY_SP,
             kind: TsKeywordTypeKind::TsAnyKeyword,
         });
-        static ANY: Type = Type::Simple(Cow::Borrowed(&ANY_TY));
+        static ANY: Type = Type::Simple(ANY_TY);
 
         if self.errored_imports.get(name).is_some() {
             return Some(&ANY);
