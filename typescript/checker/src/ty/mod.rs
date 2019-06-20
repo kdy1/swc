@@ -5,9 +5,10 @@ use crate::{
 use std::borrow::Cow;
 use swc_common::{Fold, Span, Spanned};
 use swc_ecma_ast::{
-    Bool, Class, Number, Str, TsEnumDecl, TsFnParam, TsInterfaceDecl, TsKeywordType,
-    TsKeywordTypeKind, TsLit, TsLitType, TsModuleDecl, TsNamespaceDecl, TsThisType, TsType,
-    TsTypeAliasDecl, TsTypeAnn, TsTypeLit, TsTypeParamDecl,
+    Bool, Class, Number, Str, TsArrayType, TsEnumDecl, TsFnParam, TsInterfaceDecl,
+    TsIntersectionType, TsKeywordType, TsKeywordTypeKind, TsLit, TsLitType, TsModuleDecl,
+    TsNamespaceDecl, TsThisType, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeLit, TsTypeParamDecl,
+    TsUnionOrIntersectionType, TsUnionType,
 };
 
 pub type TypeRef<'a> = Cow<'a, Type>;
@@ -66,6 +67,27 @@ impl From<TsType> for Type {
         match ty {
             TsType::TsLitType(ty) => ty.into(),
             TsType::TsKeywordType(ty) => ty.into(),
+            TsType::TsUnionOrIntersectionType(TsUnionOrIntersectionType::TsUnionType(
+                TsUnionType { span, types },
+            )) => Union {
+                span,
+                types: types.into_iter().map(From::from).collect(),
+            }
+            .into(),
+            TsType::TsUnionOrIntersectionType(TsUnionOrIntersectionType::TsIntersectionType(
+                TsIntersectionType { span, types },
+            )) => Intersection {
+                span,
+                types: types.into_iter().map(From::from).collect(),
+            }
+            .into(),
+            TsType::TsArrayType(TsArrayType {
+                span,
+                box elem_type,
+            }) => Type::Array(Array {
+                span,
+                elem_type: box elem_type.into(),
+            }),
             _ => Type::Simple(ty),
         }
     }
