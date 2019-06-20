@@ -136,13 +136,13 @@ impl Merge for Type {
                     tys.append(types);
                 }
 
-                _ => tys.push(ty.owned()),
+                _ => tys.push(ty),
             }
         }
 
         *self = match tys.len() {
             0 => unreachable!(),
-            1 => tys.into_iter().next().unwrap().into_owned(),
+            1 => tys.into_iter().next().unwrap(),
             _ => Type::Union(Union {
                 span: l_span,
                 types: tys,
@@ -253,7 +253,7 @@ impl Analyzer<'_, '_> {
 
                                 let errors = ty.assign_to(&var_ty);
                                 if errors.is_none() {
-                                    Some(ty)
+                                    Some(ty.clone())
                                 } else {
                                     self.info.errors.extend(errors);
                                     None
@@ -278,7 +278,7 @@ impl Analyzer<'_, '_> {
                                     {
                                         Some(Type::any(var_info.ty.as_ref().unwrap().span()))
                                     } else {
-                                        Some(ty)
+                                        Some(ty.clone())
                                     },
                                     copied: true,
                                     ..var_info.clone()
@@ -327,14 +327,14 @@ impl Analyzer<'_, '_> {
         facts.true_facts.types.insert(
             sym.into(),
             VarInfo {
-                ty: Some(ty.clone().remove_falsy()),
+                ty: Some(ty.clone().remove_falsy().into_owned()),
                 ..base!()
             },
         );
         facts.false_facts.types.insert(
             sym.into(),
             VarInfo {
-                ty: Some(ty.clone().remove_truthy()),
+                ty: Some(ty.clone().remove_truthy().into_owned()),
                 ..base!()
             },
         );
@@ -633,51 +633,40 @@ pub(super) trait RemoveTypes<'a> {
     fn remove_truthy(self) -> TypeRef<'a>;
 }
 
-impl<'a> RemoveTypes<'a> for Cow<'a, TsType> {
+impl<'a> RemoveTypes<'a> for Type {
     fn remove_falsy(self) -> TypeRef<'a> {
-        match *self {
-            TsType::TsKeywordType(TsKeywordType { kind, span }) => match kind {
+        match self {
+            Type::Keyword(TsKeywordType { kind, span }) => match kind {
                 TsKeywordTypeKind::TsUndefinedKeyword | TsKeywordTypeKind::TsNullKeyword => {
                     return Type::never(span).owned()
                 }
                 _ => {}
             },
-            TsType::TsLitType(ty) => match ty.lit {
-                TsLit::Bool(Bool { value: false, span }) => return Type::never(span).owned(),
-                _ => return Type::from(TsType::TsLitType(ty)).owned(),
-            },
+            Type::Lit(TsLitType {
+                lit:
+                    TsLit::Bool(Bool {
+                        value: false, span, ..
+                    }),
+                ..
+            }) => return Type::never(span).owned(),
+
+            Type::Union(u) => return u.remove_falsy(),
+            Type::Intersection(i) => return i.remove_falsy(),
             _ => {}
         }
 
-        self.into_cow()
-    }
-
-    fn remove_truthy(self) -> TypeRef<'a> {
-        match *self {
-            TsType::TsLitType(ty) => match ty.lit {
-                TsLit::Bool(Bool { value: true, span }) => return Cow::Owned(Type::never(span)),
-                _ => return Type::from(TsType::TsLitType(ty)).owned(),
-            },
-            _ => {}
-        }
-
-        self.into_cow()
-    }
-}
-
-impl<'a> RemoveTypes<'a> for Type {
-    fn remove_falsy(self) -> TypeRef<'a> {
-        match self {
-            Type::Simple(ty) => ty.remove_falsy(),
-            Type::Union(u) => u.remove_falsy(),
-            Type::Intersection(i) => i.remove_falsy(),
-            _ => Cow::Owned(self),
-        }
+        Cow::Owned(self)
     }
 
     fn remove_truthy(self) -> TypeRef<'a> {
         match self {
-            Type::Simple(ty) => ty.remove_truthy(),
+            Type::Lit(TsLitType {
+                lit: TsLit::Bool(Bool {
+                    value: true, span, ..
+                }),
+                ..
+            }) => return Type::never(span).owned(),
+
             Type::Union(u) => u.remove_truthy(),
             Type::Intersection(i) => i.remove_truthy(),
             _ => Cow::Owned(self),
@@ -690,7 +679,7 @@ impl<'a> RemoveTypes<'a> for Intersection {
         let types = self
             .types
             .into_iter()
-            .map(|ty| ty.remove_falsy())
+            .map(|ty| ty.remove_falsy().into_owned())
             .collect::<Vec<_>>();
         if types.iter().any(|ty| ty.is_never()) {
             return Type::never(self.span).owned();
@@ -707,7 +696,7 @@ impl<'a> RemoveTypes<'a> for Intersection {
         let types = self
             .types
             .into_iter()
-            .map(|ty| ty.remove_truthy())
+            .map(|ty| ty.remove_truthy().into_owned())
             .collect::<Vec<_>>();
         if types.iter().any(|ty| ty.is_never()) {
             return Type::never(self.span).owned();
@@ -726,7 +715,7 @@ impl<'a> RemoveTypes<'a> for Union {
         let types = self
             .types
             .into_iter()
-            .map(|ty| ty.remove_falsy())
+            .map(|ty| ty.remove_falsy().into_owned())
             .filter(|ty| !ty.is_never())
             .collect();
         Union {
@@ -740,7 +729,7 @@ impl<'a> RemoveTypes<'a> for Union {
         let types = self
             .types
             .into_iter()
-            .map(|ty| ty.remove_truthy())
+            .map(|ty| ty.remove_truthy().into_owned())
             .filter(|ty| !ty.is_never())
             .collect();
         Union {
