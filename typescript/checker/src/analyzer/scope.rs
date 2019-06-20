@@ -11,7 +11,7 @@ use swc_ecma_ast::*;
 pub(super) struct VarInfo {
     pub kind: VarDeclKind,
     pub initialized: bool,
-    pub ty: Option<Type<'static>>,
+    pub ty: Option<Type>,
     /// Copied from parent scope. If this is true, it's not a variable
     /// declaration.
     pub copied: bool,
@@ -33,7 +33,7 @@ pub(super) struct Scope<'a> {
     /// string; } }`
     ///
     /// TODO(kdy1): Use vector (for performance)
-    pub(super) types: FxHashMap<JsWord, Type<'static>>,
+    pub(super) types: FxHashMap<JsWord, Type>,
 
     kind: ScopeKind,
     /// Declared variables and parameters.
@@ -92,7 +92,7 @@ impl<'a> Scope<'a> {
         &mut self,
         kind: VarDeclKind,
         name: JsWord,
-        ty: Option<Type<'static>>,
+        ty: Option<Type>,
         initialized: bool,
         allow_multiple: bool,
     ) {
@@ -132,7 +132,7 @@ impl<'a> Scope<'a> {
     }
 
     /// This method does cannot handle imported types.
-    pub(super) fn find_type(&self, name: &JsWord) -> Option<&Type<'static>> {
+    pub(super) fn find_type(&self, name: &JsWord) -> Option<&Type> {
         if let Some(ty) = self.types.get(name) {
             return Some(&*ty);
         }
@@ -143,7 +143,7 @@ impl<'a> Scope<'a> {
         }
     }
 
-    pub fn register_type(&mut self, name: JsWord, data: Type<'static>) {
+    pub fn register_type(&mut self, name: JsWord, data: Type) {
         self.types.insert(name, data);
     }
 }
@@ -189,7 +189,7 @@ impl Analyzer<'_, '_> {
         self.find_var(name).and_then(|v| v.ty.as_ref())
     }
 
-    pub(super) fn find_type(&self, name: &JsWord) -> Option<&Type<'static>> {
+    pub(super) fn find_type(&self, name: &JsWord) -> Option<&Type> {
         static ANY_TY: TsType = TsType::TsKeywordType(TsKeywordType {
             span: DUMMY_SP,
             kind: TsKeywordTypeKind::TsAnyKeyword,

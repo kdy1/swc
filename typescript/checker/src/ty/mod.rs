@@ -11,17 +11,17 @@ use swc_ecma_ast::{
     TsUnionOrIntersectionType, TsUnionType,
 };
 
-pub(crate) type TypeRef<'a> = Cow<'a, Type<'a>>;
+pub(crate) type TypeRef<'a> = Cow<'a, Type>;
 
 #[derive(Debug, Fold, Clone, PartialEq, FromVariant, Spanned)]
-pub(crate) enum Type<'a> {
+pub(crate) enum Type {
     Keyword(TsKeywordType),
-    Simple(Cow<'a, TsType>),
-    Array(Array<'a>),
-    Union(Union<'a>),
-    Intersection(Intersection<'a>),
-    Function(Function<'a>),
-    Constructor(Constructor<'a>),
+    Simple(TsType),
+    Array(Array),
+    Union(Union),
+    Intersection(Intersection),
+    Function(Function),
+    Constructor(Constructor),
 
     Interface(TsInterfaceDecl),
     Enum(TsEnumDecl),
@@ -33,54 +33,42 @@ pub(crate) enum Type<'a> {
 }
 
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
-pub struct Array<'a> {
+pub struct Array {
     pub span: Span,
-    pub elem_type: Box<TypeRef<'a>>,
+    pub elem_type: Box<Type>,
 }
 
 /// a | b
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
-pub struct Union<'a> {
+pub struct Union {
     pub span: Span,
-    pub types: Vec<TypeRef<'a>>,
+    pub types: Vec<Type>,
 }
 
 /// a & b
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
-pub struct Intersection<'a> {
+pub struct Intersection {
     pub span: Span,
-    pub types: Vec<TypeRef<'a>>,
+    pub types: Vec<Type>,
 }
 
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
-pub struct Function<'a> {
+pub struct Function {
     pub span: Span,
     pub type_params: Option<TsTypeParamDecl>,
     pub params: Vec<TsFnParam>,
-    pub ret_ty: Box<TypeRef<'a>>,
+    pub ret_ty: Box<Type>,
 }
 
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
-pub struct Constructor<'a> {
+pub struct Constructor {
     pub span: Span,
     pub type_params: Option<TsTypeParamDecl>,
     pub params: Vec<TsFnParam>,
-    pub ret_ty: Box<TypeRef<'a>>,
+    pub ret_ty: Box<Type>,
 }
 
-impl<'a> From<&'a TsType> for Type<'a> {
-    fn from(ty: &'a TsType) -> Self {
-        Type::Simple(Cow::Borrowed(ty))
-    }
-}
-
-impl<'a> From<TsType> for Type<'a> {
-    fn from(ty: TsType) -> Self {
-        Type::Simple(Cow::Owned(ty))
-    }
-}
-
-impl<'a> Type<'a> {
+impl Type {
     pub fn contains_void(&self) -> bool {
         let ty = match *self {
             Type::Simple(ref ty) => ty,
@@ -174,8 +162,8 @@ impl<'a> Type<'a> {
         try_assign(to, self).map(|err| match err {
             Error::AssignFailed { .. } => err,
             _ => Error::AssignFailed {
-                left: to.clone().into_static(),
-                right: self.clone().into_static(),
+                left: to.clone(),
+                right: self.clone(),
                 cause: vec![err],
             },
         })
@@ -226,8 +214,8 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
                     }) => return None,
                     _ => {
                         return Some(Error::AssignFailed {
-                            left: to.clone().into_static(),
-                            right: rhs.clone().into_static(),
+                            left: to.clone(),
+                            right: rhs.clone(),
                             cause: vec![],
                         })
                     }
@@ -355,15 +343,15 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
                     }) => {
                         return try_assign(&Type::from(&**elem_type), &Type::from(&**rhs_elem_type))
                             .map(|cause| Error::AssignFailed {
-                                left: to.clone().into_static(),
-                                right: rhs.clone().into_static(),
+                                left: to.clone(),
+                                right: rhs.clone(),
                                 cause: vec![cause],
                             })
                     }
                     _ => {
                         return Some(Error::AssignFailed {
-                            left: to.clone().into_static(),
-                            right: rhs.clone().into_static(),
+                            left: to.clone(),
+                            right: rhs.clone(),
                             cause: vec![],
                         })
                     }
@@ -426,8 +414,8 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
                 }
 
                 return Some(Error::AssignFailed {
-                    left: to.clone().into_static(),
-                    right: rhs.clone().into_static(),
+                    left: to.clone(),
+                    right: rhs.clone(),
                     cause: vec![],
                 });
             }
@@ -473,53 +461,44 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
     unimplemented!("assign: \nLeft: {:?}\nRight: {:?}", to, rhs)
 }
 
-impl From<TsTypeAnn> for Type<'_> {
+impl From<TsTypeAnn> for Type {
     fn from(ann: TsTypeAnn) -> Self {
-        Type::Simple(Cow::Owned(*ann.type_ann))
+        ann.type_ann.into()
     }
 }
 
-impl<'a> Type<'a> {
-    pub fn into_static(self) -> Type<'static> {
-        match self {
-            Type::Simple(c) => Type::Simple(Cow::Owned(c.into_owned())),
-            Type::Alias(a) => Type::Alias(a),
-            Type::Interface(i) => Type::Interface(i),
-            Type::Enum(e) => Type::Enum(e),
-            Type::Namespace(ns) => Type::Namespace(ns),
-            Type::Module(m) => Type::Module(m),
-            Type::Class(c) => Type::Class(c),
-        }
+impl<T> From<Box<T>> for Type {
+    fn from(ty: Box<T>) -> Self {
+        (*ty).into()
     }
+}
 
+impl Type {
     pub fn is_never(&self) -> bool {
-        match *self {
-            Type::Simple(ref ty) => match **ty {
-                TsType::TsKeywordType(TsKeywordType {
-                    kind: TsKeywordTypeKind::TsNeverKeyword,
-                    ..
-                }) => false,
-                _ => true,
-            },
+        match &self {
+            Type::Keyword(TsKeywordType {
+                kind: TsKeywordTypeKind::TsNeverKeyword,
+                ..
+            }) => true,
             _ => false,
         }
     }
 
-    pub const fn never<'any>(span: Span) -> Type<'any> {
+    pub const fn never(span: Span) -> Type {
         Type::Keyword(TsKeywordType {
             span,
             kind: TsKeywordTypeKind::TsNeverKeyword,
         })
     }
 
-    pub const fn undefined<'any>(span: Span) -> Type<'any> {
+    pub const fn undefined(span: Span) -> Type {
         Type::Keyword(TsKeywordType {
             span,
             kind: TsKeywordTypeKind::TsUndefinedKeyword,
         })
     }
 
-    pub const fn any<'any>(span: Span) -> Type<'any> {
+    pub const fn any(span: Span) -> Type {
         Type::Keyword(TsKeywordType {
             span,
             kind: TsKeywordTypeKind::TsAnyKeyword,
@@ -527,4 +506,4 @@ impl<'a> Type<'a> {
     }
 }
 
-impl<'a> CowUtil<'a> for Type<'a> {}
+impl CowUtil<'_> for Type {}

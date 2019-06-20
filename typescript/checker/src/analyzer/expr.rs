@@ -58,7 +58,7 @@ impl Analyzer<'_, '_> {
                         }) => {
                             let ty = self.type_of(expr)?.generalize_lit();
                             if types.iter().all(|l| !l.eq_ignore_span(&ty)) {
-                                types.push(ty.into_static().owned())
+                                types.push(ty.owned())
                             }
                         }
                         Some(ExprOrSpread {
@@ -213,7 +213,7 @@ impl Analyzer<'_, '_> {
             }) => {
                 let callee_type = self
                     .extract_call_new_expr(callee, ExtractKind::Call, args, type_args.as_ref())
-                    .map(|v| v.into_static())?;
+                    .map(|v| v)?;
 
                 return Ok(callee_type.into_cow());
             }
@@ -360,7 +360,7 @@ impl Analyzer<'_, '_> {
         .into()
     }
 
-    pub(super) fn type_of_class(&self, c: &Class) -> Result<Type<'static>, Error> {
+    pub(super) fn type_of_class(&self, c: &Class) -> Result<Type, Error> {
         // let mut type_props = vec![];
         // for member in &c.body {
         //     let span = member.span();
@@ -450,22 +450,19 @@ impl Analyzer<'_, '_> {
         Ok(Type::Class(c.clone()))
     }
 
-    pub(super) fn infer_return_type(
-        &self,
-        body: &BlockStmt,
-    ) -> Result<Option<Type<'static>>, Error> {
+    pub(super) fn infer_return_type(&self, body: &BlockStmt) -> Result<Option<Type>, Error> {
         let mut types = vec![];
 
         struct Visitor<'a> {
             a: &'a Analyzer<'a, 'a>,
             span: Span,
-            types: &'a mut Vec<Result<Type<'static>, Error>>,
+            types: &'a mut Vec<Result<Type, Error>>,
         }
 
         impl Visit<ReturnStmt> for Visitor<'_> {
             fn visit(&mut self, stmt: &ReturnStmt) {
                 let ty = match stmt.arg {
-                    Some(ref arg) => self.a.type_of(arg).map(|ty| ty.into_static()),
+                    Some(ref arg) => self.a.type_of(arg).map(|ty| ty),
                     None => Ok(Type::undefined(self.span)),
                 };
                 self.types.push(ty);
@@ -499,7 +496,7 @@ impl Analyzer<'_, '_> {
         }
     }
 
-    pub(super) fn type_of_arrow_fn(&self, f: &ArrowExpr) -> Result<Type<'static>, Error> {
+    pub(super) fn type_of_arrow_fn(&self, f: &ArrowExpr) -> Result<Type, Error> {
         let ret_ty = match f.return_type {
             Some(ref ret_ty) => self.expand(f.span, (&*ret_ty.type_ann).into_cow())?,
             None => match f.body {
@@ -521,7 +518,7 @@ impl Analyzer<'_, '_> {
         .into())
     }
 
-    pub(super) fn type_of_fn(&self, f: &Function) -> Result<Type<'static>, Error> {
+    pub(super) fn type_of_fn(&self, f: &Function) -> Result<Type, Error> {
         let ret_ty = match f.return_type {
             Some(ref ret_ty) => self.expand(f.span, Type::from(&*ret_ty.type_ann))?,
             None => match f.body {
@@ -549,7 +546,7 @@ impl Analyzer<'_, '_> {
         kind: ExtractKind,
         args: &[ExprOrSpread],
         type_args: Option<&TsTypeParamInstantiation>,
-    ) -> Result<Type<'e>, Error> {
+    ) -> Result<Type, Error> {
         let span = callee.span();
 
         match *callee {
@@ -683,7 +680,7 @@ impl Analyzer<'_, '_> {
         kind: ExtractKind,
         args: &[ExprOrSpread],
         type_args: Option<&TsTypeParamInstantiation>,
-    ) -> Result<Type<'a>, Error> {
+    ) -> Result<Type, Error> {
         let any = Type::any(span);
         let ty = self.expand(span, ty)?;
 
@@ -818,12 +815,12 @@ impl Analyzer<'_, '_> {
         &'a self,
         span: Span,
         callee_span: Span,
-        ret_type: Type<'a>,
+        ret_type: Type,
         param_decls: &[TsFnParam],
         ty_params_decl: Option<&TsTypeParamDecl>,
         args: &[ExprOrSpread],
         i: Option<&TsTypeParamInstantiation>,
-    ) -> Result<Type<'a>, Error> {
+    ) -> Result<Type, Error> {
         {
             // let type_params_len = ty_params_decl.map(|decl|
             // decl.params.len()).unwrap_or(0); let type_args_len = i.map(|v|

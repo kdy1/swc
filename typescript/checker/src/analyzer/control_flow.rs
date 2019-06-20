@@ -116,7 +116,7 @@ impl Merge for VarInfo {
     }
 }
 
-impl Merge for Type<'_> {
+impl Merge for Type {
     fn or(&mut self, r: Self) {
         let l_span = self.span();
 
@@ -227,7 +227,7 @@ impl Analyzer<'_, '_> {
 }
 
 impl Analyzer<'_, '_> {
-    pub(super) fn try_assign<'any>(&mut self, lhs: &PatOrExpr, ty: &'any Type<'any>) {
+    pub(super) fn try_assign(&mut self, lhs: &PatOrExpr, ty: &Type) {
         match *lhs {
             PatOrExpr::Expr(ref expr) | PatOrExpr::Pat(box Pat::Expr(ref expr)) => match **expr {
                 // TODO(kdy1): Validate
@@ -253,7 +253,7 @@ impl Analyzer<'_, '_> {
 
                                 let errors = ty.assign_to(&var_ty);
                                 if errors.is_none() {
-                                    Some(ty.into_static())
+                                    Some(ty)
                                 } else {
                                     self.info.errors.extend(errors);
                                     None
@@ -278,7 +278,7 @@ impl Analyzer<'_, '_> {
                                     {
                                         Some(Type::any(var_info.ty.as_ref().unwrap().span()))
                                     } else {
-                                        Some(ty.into_static())
+                                        Some(ty)
                                     },
                                     copied: true,
                                     ..var_info.clone()
@@ -309,7 +309,7 @@ impl Analyzer<'_, '_> {
         }
     }
 
-    fn add_true_false(&self, facts: &mut Facts, sym: &JsWord, ty: &Type<'static>) {
+    fn add_true_false(&self, facts: &mut Facts, sym: &JsWord, ty: &Type) {
         macro_rules! base {
             () => {{
                 match self.find_var(&sym) {
@@ -327,14 +327,14 @@ impl Analyzer<'_, '_> {
         facts.true_facts.types.insert(
             sym.into(),
             VarInfo {
-                ty: Some(ty.clone().remove_falsy().into_static()),
+                ty: Some(ty.clone().remove_falsy()),
                 ..base!()
             },
         );
         facts.false_facts.types.insert(
             sym.into(),
             VarInfo {
-                ty: Some(ty.clone().remove_truthy().into_static()),
+                ty: Some(ty.clone().remove_truthy()),
                 ..base!()
             },
         );
@@ -379,7 +379,7 @@ impl Analyzer<'_, '_> {
 
             Expr::Ident(ref i) => {
                 let ty = self.type_of(test)?;
-                self.add_true_false(facts, &i.sym, &ty.into_static());
+                self.add_true_false(facts, &i.sym, &ty);
             }
 
             Expr::Bin(BinExpr {
@@ -486,7 +486,7 @@ impl Analyzer<'_, '_> {
                                     kind: VarDeclKind::Const,
                                     initialized: true,
                                     copied: true,
-                                    ty: Some(ty.into_owned().into_static()),
+                                    ty: Some(ty.into_owned()),
                                 };
                                 if is_eq {
                                     facts.true_facts.types.insert(name, v);
@@ -665,7 +665,7 @@ impl<'a> RemoveTypes<'a> for Cow<'a, TsType> {
     }
 }
 
-impl<'a> RemoveTypes<'a> for Type<'a> {
+impl<'a> RemoveTypes<'a> for Type {
     fn remove_falsy(self) -> TypeRef<'a> {
         match self {
             Type::Simple(ty) => ty.remove_falsy(),
@@ -685,7 +685,7 @@ impl<'a> RemoveTypes<'a> for Type<'a> {
     }
 }
 
-impl<'a> RemoveTypes<'a> for Intersection<'a> {
+impl<'a> RemoveTypes<'a> for Intersection {
     fn remove_falsy(self) -> TypeRef<'a> {
         let types = self
             .types
@@ -721,7 +721,7 @@ impl<'a> RemoveTypes<'a> for Intersection<'a> {
     }
 }
 
-impl<'a> RemoveTypes<'a> for Union<'a> {
+impl<'a> RemoveTypes<'a> for Union {
     fn remove_falsy(mut self) -> TypeRef<'a> {
         let types = self
             .types

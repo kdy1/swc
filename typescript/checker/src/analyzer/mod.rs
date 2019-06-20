@@ -24,7 +24,7 @@ mod util;
 
 struct Analyzer<'a, 'b> {
     info: Info,
-    resolved_imports: FxHashMap<JsWord, Arc<Type<'static>>>,
+    resolved_imports: FxHashMap<JsWord, Arc<Type>>,
     errored_imports: FxHashSet<JsWord>,
     pending_exports: Vec<((JsWord, Span), Box<Expr>)>,
     scope: Scope<'a>,
@@ -223,7 +223,7 @@ impl<'a, 'b> Analyzer<'a, 'b> {
 
 #[derive(Debug, Default)]
 pub struct Info {
-    pub exports: FxHashMap<JsWord, Arc<Type<'static>>>,
+    pub exports: FxHashMap<JsWord, Arc<Type>>,
     pub errors: Vec<Error>,
 }
 
@@ -441,7 +441,7 @@ impl Visit<VarDecl> for Analyzer<'_, '_> {
                                 Pat::Ident(ref i) => i.sym.clone(),
                                 _ => unimplemented!("declare_var with complex type inference"),
                             },
-                            Some(ty.into_static()),
+                            Some(ty),
                             // initialized
                             true,
                             // Variable declarations does not allow multiple declarations with same
