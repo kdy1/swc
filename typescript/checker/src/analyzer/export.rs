@@ -48,7 +48,7 @@ impl Analyzer<'_, '_> {
             {
                 Some(export) => export,
                 None => match self.type_of(&expr) {
-                    Ok(ty) => ty.into(),
+                    Ok(ty) => ty.into_owned(),
                     Err(err) => {
                         self.info.errors.push(err);
                         return;
@@ -69,7 +69,7 @@ impl Analyzer<'_, '_> {
         );
 
         let ty = match self.type_of(expr) {
-            Ok(ty) => ty.into(),
+            Ok(ty) => ty.into_owned(),
             Err(err) => {
                 match err {
                     // Handle hoisting. This allows
