@@ -177,8 +177,13 @@ impl Analyzer<'_, '_> {
         // println!("({}) find_var_type({})", self.scope.depth(), name);
         let mut scope = Some(&self.scope);
         while let Some(s) = scope {
-            if let Some(ref v) = s.facts.types.get(&Name::from(name)).and_then(|v| v.ty) {
-                return Some(&*v);
+            if let Some(ref v) = s
+                .facts
+                .types
+                .get(&Name::from(name))
+                .and_then(|v| v.ty.as_ref())
+            {
+                return Some(v);
             }
 
             scope = s.parent;
@@ -188,11 +193,10 @@ impl Analyzer<'_, '_> {
     }
 
     pub(super) fn find_type(&self, name: &JsWord) -> Option<&Type> {
-        static ANY_TY: TsType = TsType::TsKeywordType(TsKeywordType {
+        static ANY: Type = Type::Keyword(TsKeywordType {
             span: DUMMY_SP,
             kind: TsKeywordTypeKind::TsAnyKeyword,
         });
-        static ANY: Type = Type::Simple(ANY_TY);
 
         if self.errored_imports.get(name).is_some() {
             return Some(&ANY);

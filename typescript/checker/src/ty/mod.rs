@@ -10,10 +10,10 @@ use swc_ecma_ast::{
     TsTypeAliasDecl, TsTypeAnn, TsTypeLit, TsTypeParamDecl,
 };
 
-pub(crate) type TypeRef<'a> = Cow<'a, Type>;
+pub type TypeRef<'a> = Cow<'a, Type>;
 
 #[derive(Debug, Fold, Clone, PartialEq, FromVariant, Spanned)]
-pub(crate) enum Type {
+pub enum Type {
     Lit(TsLitType),
     Keyword(TsKeywordType),
     Simple(TsType),
@@ -259,13 +259,9 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
 
         Type::Keyword(TsKeywordType { kind, .. }) => {
             match *rhs {
-                Type::Simple(ref rhs) => match *rhs {
-                    TsType::TsKeywordType(TsKeywordType { kind: rhs_kind, .. })
-                        if rhs_kind == kind =>
-                    {
-                        return None
-                    }
-                },
+                Type::Keyword(TsKeywordType { kind: rhs_kind, .. }) if rhs_kind == kind => {
+                    return None
+                }
                 _ => {}
             }
 
@@ -356,19 +352,6 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
                 }
             }
 
-            TsType::TsLitType(TsLitType { ref lit, .. }) => match *to {
-                Type::Simple(ref ty) => match *ty {
-                    TsType::TsLitType(TsLitType { lit: ref r_lit, .. }) => {
-                        if lit.eq_ignore_span(r_lit) {
-                            return None;
-                        }
-                    }
-                },
-                // TODO: allow
-                // let a: true | false = bool
-                _ => {}
-            },
-
             TsType::TsThisType(TsThisType { span }) => {
                 return Some(Error::CannotAssingToThis { span })
             }
@@ -404,6 +387,19 @@ fn try_assign(to: &Type, rhs: &Type) -> Option<Error> {
 
             _ => {}
         },
+
+        Type::Lit(TsLitType { ref lit, .. }) => match *to {
+            Type::Lit(TsLitType { lit: ref r_lit, .. }) => {
+                if lit.eq_ignore_span(r_lit) {
+                    return None;
+                }
+            }
+            // TODO: allow
+            // let a: true | false = bool
+            _ => {}
+        },
+
+        _ => {}
     }
 
     // This is slow (at the time of writing)

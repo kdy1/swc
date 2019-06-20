@@ -185,7 +185,7 @@ impl AddAssign<Option<Self>> for CondFacts {
 
 impl BitOr for CondFacts {
     type Output = Self;
-    fn bitor(mut self, rhs: Self) -> Self {
+    fn bitor(self, rhs: Self) -> Self {
         CondFacts {
             facts: CondFacts::or(self.facts, rhs.facts),
             types: CondFacts::or(self.types, rhs.types),
@@ -343,8 +343,6 @@ impl Analyzer<'_, '_> {
     /// Returns (type facts when test is matched, type facts when test is not
     /// matched)
     fn detect_facts(&self, test: &Expr, facts: &mut Facts) -> Result<(), Error> {
-        let span = test.span();
-
         match *test {
             // Useless
             Expr::Fn(..)
@@ -475,10 +473,8 @@ impl Analyzer<'_, '_> {
                                 ..
                             }) => {
                                 //
-                                Some((Name::try_from(l), r_ty))
+                                Some((Name::try_from(l), r_ty.clone().into_owned()))
                             }
-                            _ => None,
-
                             _ => None,
                         }) {
                             Some((Ok(name), ty)) => {
@@ -486,7 +482,7 @@ impl Analyzer<'_, '_> {
                                     kind: VarDeclKind::Const,
                                     initialized: true,
                                     copied: true,
-                                    ty: Some(ty.into_owned()),
+                                    ty: Some(ty),
                                 };
                                 if is_eq {
                                     facts.true_facts.types.insert(name, v);
@@ -711,7 +707,7 @@ impl<'a> RemoveTypes<'a> for Intersection {
 }
 
 impl<'a> RemoveTypes<'a> for Union {
-    fn remove_falsy(mut self) -> TypeRef<'a> {
+    fn remove_falsy(self) -> TypeRef<'a> {
         let types = self
             .types
             .into_iter()
@@ -725,7 +721,7 @@ impl<'a> RemoveTypes<'a> for Union {
         .into_cow()
     }
 
-    fn remove_truthy(mut self) -> TypeRef<'a> {
+    fn remove_truthy(self) -> TypeRef<'a> {
         let types = self
             .types
             .into_iter()

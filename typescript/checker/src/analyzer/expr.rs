@@ -56,7 +56,7 @@ impl Analyzer<'_, '_> {
                             spread: None,
                             ref expr,
                         }) => {
-                            let ty = self.type_of(expr)?.generalize_lit();
+                            let ty = self.type_of(expr)?.into_owned().generalize_lit();
                             if types.iter().all(|l| !l.eq_ignore_span(&ty)) {
                                 types.push(ty)
                             }
@@ -602,7 +602,7 @@ impl Analyzer<'_, '_> {
                         return Ok(Type::any(span));
                     }
 
-                    Type::Simple(obj_type) => match obj_type {
+                    Type::Simple(ref obj_type) => match *obj_type {
                         TsType::TsTypeLit(TsTypeLit { ref members, .. }) => {
                             // Candidates of the method call.
                             //
@@ -745,7 +745,7 @@ impl Analyzer<'_, '_> {
                 Err(Error::UnionError { span, errors })
             }
 
-            Type::Simple(s) => match s {
+            Type::Simple(ref s) => match *s {
                 TsType::TsTypeLit(ref lit) => {
                     for member in &lit.members {
                         match *member {
@@ -762,7 +762,7 @@ impl Analyzer<'_, '_> {
                                     type_ann
                                         .as_ref()
                                         .map(|v| Type::from(v.type_ann.clone()))
-                                        .unwrap_or_else(|| any),
+                                        .unwrap_or_else(|| Type::any(span)),
                                     params,
                                     type_params.as_ref(),
                                     args,
@@ -785,7 +785,7 @@ impl Analyzer<'_, '_> {
                                     type_ann
                                         .as_ref()
                                         .map(|v| Type::from(v.type_ann.clone()))
-                                        .unwrap_or_else(|| any),
+                                        .unwrap_or_else(|| Type::any(span)),
                                     params,
                                     type_params.as_ref(),
                                     args,
@@ -806,6 +806,8 @@ impl Analyzer<'_, '_> {
 
                 _ => ret_err!(),
             },
+
+            _ => ret_err!(),
         }
     }
 
@@ -1019,12 +1021,19 @@ impl Analyzer<'_, '_> {
                 }
 
                 TsType::TsTypeQuery(TsTypeQuery { ref expr_name, .. }) => match *expr_name {
-                    TsEntityName::Ident(ref i) => return self.type_of(&Expr::Ident(i.clone())),
+                    TsEntityName::Ident(ref i) => {
+                        return self
+                            .type_of(&Expr::Ident(i.clone()))
+                            .map(|ty| ty.into_owned())
+                            .map(Cow::Owned)
+                    }
                     _ => unimplemented!("expand(TsTypeQuery): typeof member.expr"),
                 },
 
                 _ => {}
             },
+
+            _ => {}
         }
 
         Ok(ty)
@@ -1049,40 +1058,44 @@ fn prop_key_to_expr(p: &Prop) -> Box<Expr> {
 
 fn negate(ty: Type) -> Type {
     match ty {
-        Type::Simple(ty) => match ty {
-            TsType::TsLitType(TsLitType { ref lit, span }) => match *lit {
-                TsLit::Bool(v) => TsType::TsLitType(TsLitType {
+        Type::Lit(TsLitType { ref lit, span }) => match *lit {
+            TsLit::Bool(v) => {
+                return Type::Lit(TsLitType {
                     lit: TsLit::Bool(Bool {
                         value: !v.value,
                         ..v
                     }),
                     span,
                 })
-                .into(),
-                TsLit::Number(v) => TsType::TsLitType(TsLitType {
+            }
+            TsLit::Number(v) => {
+                return Type::Lit(TsLitType {
                     lit: TsLit::Bool(Bool {
                         value: v.value != 0.0,
                         span: v.span,
                     }),
                     span,
                 })
-                .into(),
-                TsLit::Str(ref v) => TsType::TsLitType(TsLitType {
+            }
+            TsLit::Str(ref v) => {
+                return Type::Lit(TsLitType {
                     lit: TsLit::Bool(Bool {
                         value: v.value != js_word!(""),
                         span: v.span,
                     }),
                     span,
                 })
-                .into(),
-            },
-            _ => TsKeywordType {
-                span: ty.span(),
-                kind: TsKeywordTypeKind::TsBooleanKeyword,
             }
-            .into(),
         },
+
+        _ => {}
     }
+
+    TsKeywordType {
+        span: ty.span(),
+        kind: TsKeywordTypeKind::TsBooleanKeyword,
+    }
+    .into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
