@@ -9,10 +9,10 @@ impl Bundler {
     /// This methods removes import statements (statements like `import a as b
     /// from 'foo'`) from module, but require calls and dynamic imports
     /// remain as-is.
-    pub(super) fn extract_info(&self, module: &mut Module) -> ImportInfo {
+    pub(super) fn extract_info(&self, module: &mut Module) -> ModuleInfo {
         let body = replace(&mut module.body, vec![]);
 
-        let mut v = ImportFinder::default();
+        let mut v = Finder::default();
         let body = body.fold_with(&mut v);
         module.body = body;
 
@@ -20,7 +20,16 @@ impl Bundler {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
+pub(super) struct ModuleInfo {
+    pub imports: ImportInfo,
+    pub exports: ExportInfo,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ExportInfo {}
+
+#[derive(Debug, Default)]
 pub(super) struct ImportInfo {
     pub imports: Vec<ImportDecl>,
     pub requires: Vec<Str>,
@@ -29,15 +38,15 @@ pub(super) struct ImportInfo {
 }
 
 #[derive(Default)]
-struct ImportFinder {
-    info: ImportInfo,
+struct Finder {
+    info: ModuleInfo,
 }
 
-impl Fold<Vec<ModuleItem>> for ImportFinder {
+impl Fold<Vec<ModuleItem>> for Finder {
     fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
         items.move_flat_map(|item| match item {
             ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
-                self.info.imports.push(i);
+                self.info.imports.imports.push(i);
                 None
             }
 
@@ -46,7 +55,7 @@ impl Fold<Vec<ModuleItem>> for ImportFinder {
     }
 }
 
-impl Fold<CallExpr> for ImportFinder {
+impl Fold<CallExpr> for Finder {
     fn fold(&mut self, node: CallExpr) -> CallExpr {
         if node.args.len() != 1 {
             return node;
@@ -64,7 +73,7 @@ impl Fold<CallExpr> for ImportFinder {
                 sym: js_word!("require"),
                 ..
             })) => {
-                self.info.requires.push(src.clone());
+                self.info.imports.requires.push(src.clone());
                 return node;
             }
 
@@ -72,7 +81,7 @@ impl Fold<CallExpr> for ImportFinder {
                 sym: js_word!("import"),
                 ..
             })) => {
-                self.info.dynamic_imports.push(src.clone());
+                self.info.imports.dynamic_imports.push(src.clone());
                 return node;
             }
 
@@ -92,7 +101,7 @@ impl Fold<CallExpr> for ImportFinder {
 ///  ```js
 /// import { readFile } from 'fs';
 /// ```
-impl Fold<VarDeclarator> for ImportFinder {
+impl Fold<VarDeclarator> for Finder {
     fn fold(&mut self, node: VarDeclarator) -> VarDeclarator {
         match node.init {
             Some(box Expr::Call(CallExpr {
@@ -115,7 +124,7 @@ impl Fold<VarDeclarator> for ImportFinder {
 
                 let ids: Vec<Ident> = find_ids(&node.name);
 
-                self.info.partial_requires.push(ImportDecl {
+                self.info.imports.partial_requires.push(ImportDecl {
                     span,
                     specifiers: ids
                         .into_iter()
