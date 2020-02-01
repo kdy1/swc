@@ -76,14 +76,14 @@ impl Bundler {
                 let (_, fm, module) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
 
-                let module = self.mark((*module).clone())?;
+                let module = self.mark_all_as_used((*module).clone())?;
 
                 Ok((fm, module))
             })
             .collect()
     }
 
-    fn mark(&self, module: Module) -> Result<Module, Error> {
+    fn mark_all_as_used(&self, module: Module) -> Result<Module, Error> {
         let module = self.drop_unused(module, None);
 
         Ok(module)
