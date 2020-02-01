@@ -69,6 +69,7 @@ impl Bundler {
 
     fn transform_module(&self, fm: Arc<SourceFile>, mut module: Module) -> Result<Module, Error> {
         let info = self.extract_info(&mut module);
+        self.store_pure_constants(ModuleId::from(&*fm), info.exports.pure_constants);
         let imports = info.imports;
 
         let (module, deps) = rayon::join(

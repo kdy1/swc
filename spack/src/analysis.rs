@@ -1,9 +1,10 @@
 use super::Bundler;
+use crate::Id;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Visit, VisitWith};
 use swc_ecma_ast::*;
-use swc_ecma_utils::find_ids;
+use swc_ecma_utils::{find_ids, undefined, ExprExt};
 
 impl Bundler {
     /// This methods removes import statements (statements like `import a as b
@@ -27,7 +28,9 @@ pub(super) struct ModuleInfo {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ExportInfo {}
+pub(super) struct ExportInfo {
+    pub pure_constants: Vec<(Id, Lit)>,
+}
 
 #[derive(Debug, Default)]
 pub(super) struct ImportInfo {
@@ -40,6 +43,48 @@ pub(super) struct ImportInfo {
 #[derive(Default)]
 struct Finder {
     info: ModuleInfo,
+}
+
+impl Fold<ExportDecl> for Finder {
+    fn fold(&mut self, decl: ExportDecl) -> ExportDecl {
+        match decl.decl {
+            Decl::Var(ref v)
+                if v.kind == VarDeclKind::Const
+                    && v.decls.iter().all(|v| {
+                        (match v.name {
+                            Pat::Ident(..) => true,
+                            _ => false,
+                        }) && (match v.init {
+                            Some(box Expr::Lit(..)) => true,
+                            _ => false,
+                        })
+                    }) =>
+            {
+                self.info
+                    .exports
+                    .pure_constants
+                    .extend(v.decls.iter().map(|decl| {
+                        let id = match &decl.name {
+                            Pat::Ident(i) => i.into(),
+                            _ => unreachable!(),
+                        };
+
+                        let lit = match &decl.init {
+                            Some(box Expr::Lit(l)) => l.clone(),
+                            _ => unreachable!(),
+                        };
+
+                        (id, lit)
+                    }));
+
+                return decl;
+            }
+
+            _ => {}
+        }
+
+        decl.fold_children(self)
+    }
 }
 
 impl Fold<Vec<ModuleItem>> for Finder {
