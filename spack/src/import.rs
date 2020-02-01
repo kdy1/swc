@@ -9,7 +9,7 @@ impl Bundler {
     /// This methods removes import statements (statements like `import a as b
     /// from 'foo'`) from module, but require calls and dynamic imports
     /// remain as-is.
-    pub(super) fn extract_imports(&self, module: &mut Module) -> ImportInfo {
+    pub(super) fn extract_info(&self, module: &mut Module) -> ImportInfo {
         let body = replace(&mut module.body, vec![]);
 
         let mut v = ImportFinder::default();
