@@ -89,13 +89,14 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
             .map(|e| -> Result<_, io::Error> { Ok(e?.path()) })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let ignore = false;
-
         let name = format!(
             "fixture::{}::{}",
             if errors { "error" } else { "pass" },
             dir_name
         );
+
+        let ignore = !name.contains(&env::var("TEST").ok().unwrap_or("".into()));
+
         add_test(tests, name, ignore, move || {
             eprintln!("\n\n========== Running reference test {}\n", dir_name);
 
