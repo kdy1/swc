@@ -4,7 +4,7 @@
 
 pub use self::id::{Id, ModuleId, QualifiedId};
 use self::{load::Load, scope::Scope};
-use crate::{id::ModuleIdGenerator, resolve::Resolve};
+use crate::{id::ModuleIdGenerator, import::ImportInfo, resolve::Resolve};
 use anyhow::Error;
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
@@ -72,13 +72,17 @@ impl Bundler {
             .map(|entry: &PathBuf| -> Result<_, Error> {
                 let (_, fm, module, imports) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
+                let module = (*module).clone();
 
-                let module = self.mark_all_as_used((*module).clone())?;
+                let module = self.handle_imports(module, imports)?;
+                let module = self.mark_all_as_used(module)?;
 
                 Ok((fm, module))
             })
             .collect()
     }
+
+    fn handle_imports(&self, module: Module, imports: Arc<ImportInfo>) -> Result<Module, Error> {}
 
     fn mark_all_as_used(&self, module: Module) -> Result<Module, Error> {
         let module = self.drop_unused(module, None);
