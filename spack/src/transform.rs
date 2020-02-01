@@ -6,6 +6,9 @@ use swc_common::{FileName, SourceFile};
 use swc_ecma_ast::{Module, Program};
 
 impl Bundler {
+    /// Phase 1 (discovery) and Phase 2 (linking)
+    ///
+    /// We apply transforms at this phase to make cache efficient.
     pub(super) fn load_transformed(
         &self,
         base: &Path,
