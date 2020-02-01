@@ -20,7 +20,7 @@ impl Bundler {
             return Ok(cached.clone());
         }
 
-        let (id, fm, module) = self.load(&path)?;
+        let (id, fm, module) = self.load(&path).context("Bundler.load failed")?;
 
         let v = self
             .transform_module(id, fm.clone(), module)
@@ -36,7 +36,7 @@ impl Bundler {
 
         let path = Arc::new(path);
 
-        let (fm, module) = self.loader.load(&path).context("failed to load")?;
+        let (fm, module) = self.loader.load(&path).context("Loader.load failed")?;
 
         Ok((module_id, fm, module))
     }
