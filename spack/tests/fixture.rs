@@ -8,7 +8,7 @@ extern crate test;
 use spack::{loader::Resolver, Bundler};
 use std::{
     env,
-    fs::read_dir,
+    fs::{create_dir_all, read_dir},
     io::{self},
     path::Path,
     sync::Arc,
@@ -68,9 +68,28 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
             .unwrap()
             .to_string();
 
-        let entries = read_dir(entry.path())?
+        let _ = create_dir_all(entry.path().join("output"));
+
+        let entries = read_dir(entry.path().join("input"))?
             .filter(|e| match e {
-                Ok(e) if e.path().to_string_lossy().starts_with("entry") => true,
+                Ok(e) => {
+                    if e.path()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("entry")
+                    {
+                        true
+                    } else {
+                        println!("Path: {}", e.path().display());
+                        println!(
+                            "FileName: {}",
+                            e.path().file_name().unwrap().to_string_lossy()
+                        );
+
+                        false
+                    }
+                }
                 _ => false,
             })
             .map(|e| -> Result<_, io::Error> { Ok(e?.path()) })
@@ -102,10 +121,12 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     ),
                 );
 
-                let bundled = bundler.bundle(&entries);
+                assert_ne!(entries.len(), 0);
 
-                for (entry, module) in entries.into_iter().zip(bundled) {
-                    let (fm, module) = module.expect("failed to bundle module");
+                let modules = bundler.bundle(&entries);
+
+                for (e, bundled) in entries.into_iter().zip(modules) {
+                    let (fm, module) = bundled.expect("failed to bundle module");
 
                     let code = bundler
                         .jsc()
@@ -119,7 +140,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                         FileName::Real(ref p) => p.clone(),
                         _ => unreachable!(),
                     };
-                    let path = entry.join("output").join(name.file_name().unwrap());
+                    let path = entry.path().join("output").join(name.file_name().unwrap());
 
                     s.compare_to_file(&path).expect("failed to print");
                 }

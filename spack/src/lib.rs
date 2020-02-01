@@ -66,22 +66,26 @@ impl Bundler {
 
         let (module, deps) = rayon::join(
             || -> Result<_, Error> {
-                // Process module
-                let config = self.jsc.config_for_file(&self.jsc_options, &*fm)?;
+                self.jsc.run(|| {
+                    // Process module
+                    let config = self.jsc.config_for_file(&self.jsc_options, &*fm)?;
 
-                let program = self.jsc.transform(
-                    Program::Module(module),
-                    config.external_helpers,
-                    config.pass,
-                );
-                match program {
-                    Program::Module(module) => Ok(module),
-                    _ => unreachable!(),
-                }
+                    let program = self.jsc.transform(
+                        Program::Module(module),
+                        config.external_helpers,
+                        config.pass,
+                    );
+                    match program {
+                        Program::Module(module) => Ok(module),
+                        _ => unreachable!(),
+                    }
+                })
             },
             || {
-                // Load dependencies
-                self.load_imports(&fm.name, imports)
+                self.jsc.run(|| {
+                    // Load dependencies
+                    self.load_imports(&fm.name, imports)
+                })
             },
         );
 
