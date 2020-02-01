@@ -13,11 +13,12 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use swc_common::FileName;
+use swc_common::{fold::FoldWith, FileName};
+use swc_ecma_ast::Program;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
-use testing::NormalizedOutput;
+use testing::{DropSpan, NormalizedOutput};
 use walkdir::WalkDir;
 
 fn add_test<F: FnOnce() + Send + 'static>(
@@ -128,15 +129,28 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                         .expect("failed to emit bundle")
                         .code;
 
-                    let s = NormalizedOutput::from(code);
-
                     let name = match fm.name {
                         FileName::Real(ref p) => p.clone(),
                         _ => unreachable!(),
                     };
-                    let path = entry.path().join("output").join(name.file_name().unwrap());
 
-                    s.compare_to_file(&path).expect("failed to print");
+                    let output_path = entry.path().join("output").join(name.file_name().unwrap());
+                    let output_fm = cm
+                        .load_file(&output_path)
+                        .expect("failed to load output file");
+                    let program = bundler
+                        .swc()
+                        .parse_js(fm, Default::default(), Default::default(), true, true)
+                        .expect("failed to parse output file as program")
+                        .fold_with(&mut DropSpan);
+
+                    if program == Program::Module(module.clone()).fold_with(&mut DropSpan) {
+                        continue;
+                    }
+
+                    let s = NormalizedOutput::from(code);
+
+                    s.compare_to_file(&output_path).expect("failed to print");
                 }
 
                 Ok(())
