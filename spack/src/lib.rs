@@ -21,6 +21,7 @@ pub mod load;
 pub mod resolve;
 mod scope;
 mod transform;
+mod usage_analysis;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -68,25 +69,26 @@ impl Bundler {
         }
     }
 
-    pub fn bundle(
-        &self,
-        entries: &[PathBuf],
-    ) -> Vec<Result<(Arc<SourceFile>, Arc<Module>), Error>> {
+    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
         entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
                 let (_, fm, module) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
 
+                let module = self.mark(module)?;
+
                 Ok((fm, module))
             })
             .collect()
     }
 
-    fn mark(&self, module: TransformedModule, exports: Option<Vec<Id>>) -> Result<Module, Error> {
-        let (id, fm, mut module) = module;
+    fn mark(&self, module: Arc<Module>) -> Result<Module, Error> {
+        let mut module = (*module).clone();
 
-        unimplemented!()
+        let module = self.drop_unused(module, None);
+
+        Ok(module)
     }
 
     fn load_imports(&self, base: &Path, info: &ImportInfo) -> Result<(), Error> {
