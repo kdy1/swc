@@ -86,7 +86,7 @@ impl Bundler {
                     };
 
                     // Load dependencies
-                    self.load_imports(&p, imports)
+                    self.load_imports(&p, &imports)
                 })
             },
         );

@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{errors::Handler, SourceFile, SourceMap};
+use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 
 mod analysis;
@@ -40,6 +40,9 @@ pub struct Bundler {
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
 
+    /// Mark for used statements
+    used_mark: Mark,
+
     scope: Scope,
 }
 
@@ -61,6 +64,7 @@ impl Bundler {
             resolver,
             scope: Default::default(),
             module_id_gen: Default::default(),
+            used_mark: Mark::fresh(Mark::root()),
         }
     }
 
@@ -79,7 +83,13 @@ impl Bundler {
             .collect()
     }
 
-    fn load_imports(&self, base: &Path, info: ImportInfo) -> Result<(), Error> {
+    fn mark(&self, module: TransformedModule, exports: Option<Vec<Id>>) -> Result<Module, Error> {
+        let (id, fm, mut module) = module;
+
+        unimplemented!()
+    }
+
+    fn load_imports(&self, base: &Path, info: &ImportInfo) -> Result<(), Error> {
         log::trace!("load_imports({})", base.display());
 
         let ImportInfo {
