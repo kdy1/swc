@@ -29,8 +29,8 @@ pub struct Bundler {
     config: Config,
 
     /// Javascript compiler.
-    jsc: swc::Compiler,
-    jsc_options: Arc<swc::config::Options>,
+    swc: swc::Compiler,
+    swc_options: Arc<swc::config::Options>,
 
     module_loader: Box<dyn Load + Sync>,
 
@@ -48,8 +48,8 @@ impl Bundler {
         Bundler {
             working_dir,
             config: Config { tree_shake: true },
-            jsc: swc::Compiler::new(cm, handler),
-            jsc_options: swc,
+            swc: swc::Compiler::new(cm, handler),
+            swc_options: swc,
             module_loader,
             scope: Default::default(),
         }
@@ -76,11 +76,11 @@ impl Bundler {
 
         let (module, deps) = rayon::join(
             || -> Result<_, Error> {
-                self.jsc.run(|| {
+                self.swc.run(|| {
                     // Process module
-                    let config = self.jsc.config_for_file(&self.jsc_options, &*fm)?;
+                    let config = self.swc.config_for_file(&self.swc_options, &*fm)?;
 
-                    let program = self.jsc.transform(
+                    let program = self.swc.transform(
                         Program::Module(module),
                         config.external_helpers,
                         config.pass,
@@ -92,7 +92,7 @@ impl Bundler {
                 })
             },
             || {
-                self.jsc.run(|| {
+                self.swc.run(|| {
                     // Load dependencies
                     self.load_imports(&fm.name, imports)
                 })
@@ -174,7 +174,7 @@ impl Bundler {
             .load(&self.working_dir, &path.as_os_str().to_string_lossy())
     }
 
-    pub fn jsc(&self) -> &swc::Compiler {
-        &self.jsc
+    pub fn swc(&self) -> &swc::Compiler {
+        &self.swc
     }
 }

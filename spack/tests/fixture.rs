@@ -124,7 +124,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     let (fm, module) = bundled.expect("failed to bundle module");
 
                     let code = bundler
-                        .jsc()
+                        .swc()
                         .print(&Program::Module(module), fm.clone(), false, false)
                         .expect("failed to emit bundle")
                         .code;
