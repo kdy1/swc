@@ -23,6 +23,7 @@ dashmap = "3.4.0"
 rayon = "1"
 log = "0.4.8"
 node-resolve = "2.2.0"
+petgraph = "0.5"
 
 [dev-dependencies]
 testing = { path = "../testing" }
