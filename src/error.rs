@@ -1,41 +1,41 @@
-use failure::Fail;
+use derive_more::Display;
 use once_cell::sync::Lazy;
 use regex;
 use serde_json;
 use sourcemap;
 use std::{io, string::FromUtf8Error};
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Display)]
 pub enum Error {
-    #[fail(display = "failed to read config file: {}", err)]
+    #[display(fmt = "failed to read config file: {}", err)]
     FailedToReadConfigFile { err: io::Error },
 
-    #[fail(display = "failed to parse config file: {}", err)]
+    #[display(fmt = "failed to parse config file: {}", err)]
     FailedToParseConfigFile { err: serde_json::error::Error },
 
-    #[fail(display = "failed to parse module")]
+    #[display(fmt = "failed to parse module")]
     FailedToParseModule {},
 
-    #[fail(display = "failed to read module: {}", err)]
+    #[display(fmt = "failed to read module: {}", err)]
     FailedToReadModule { err: io::Error },
 
-    #[fail(display = "failed to emit module: {}", err)]
+    #[display(fmt = "failed to emit module: {}", err)]
     FailedToEmitModule { err: io::Error },
 
-    #[fail(display = "failed to write sourcemap: {}", err)]
+    #[display(fmt = "failed to write sourcemap: {}", err)]
     FailedToWriteSourceMap { err: sourcemap::Error },
 
-    #[fail(display = "sourcemap is not utf8: {}", err)]
+    #[display(fmt = "sourcemap is not utf8: {}", err)]
     SourceMapNotUtf8 { err: FromUtf8Error },
 
-    #[fail(display = "invalid regexp: {}: {}", regex, err)]
+    #[display(fmt = "invalid regexp: {}: {}", regex, err)]
     InvalidRegex { regex: String, err: regex::Error },
 
-    /* #[fail(display = "generated code is not utf8: {}", err)]
+    /* #[display = "generated code is not utf8: {}", err]
      * GeneratedCodeNotUtf8 { err: FromUtf8Error }, */
     /// This means `test` field in .swcrc file did not matched the compiling
     /// file.
-    #[fail(display = "unmatched")]
+    #[display = "unmatched"]
     Unmatched,
 }
 
@@ -47,4 +47,20 @@ pub(crate) fn debug() -> bool {
     });
 
     *DEBUG
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::FailedToReadConfigFile { err } => Some(err),
+            Error::FailedToParseConfigFile { err } => Some(err),
+            Error::FailedToParseModule {} => None,
+            Error::FailedToReadModule { err } => Some(err),
+            Error::FailedToEmitModule { err } => Some(err),
+            Error::FailedToWriteSourceMap { err } => Some(err),
+            Error::SourceMapNotUtf8 { err } => Some(err),
+            Error::InvalidRegex { err, .. } => Some(err),
+            Error::Unmatched => None,
+        }
+    }
 }
