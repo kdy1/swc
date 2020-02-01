@@ -160,6 +160,6 @@ fn pass() {
 fn errors() {
     let args: Vec<_> = env::args().collect();
     let mut tests = Vec::new();
-    reference_tests(&mut tests, false).unwrap();
+    reference_tests(&mut tests, true).unwrap();
     test_main(&args, tests, Some(Options::new()));
 }
