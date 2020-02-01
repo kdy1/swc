@@ -2,9 +2,9 @@ use super::Bundler;
 use crate::Id;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Visit, VisitWith, DUMMY_SP};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{find_ids, undefined, ExprExt};
+use swc_ecma_utils::find_ids;
 
 impl Bundler {
     /// This methods removes import statements (statements like `import a as b

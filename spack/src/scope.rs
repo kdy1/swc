@@ -1,7 +1,5 @@
 use super::Bundler;
-use crate::analysis::ExportInfo;
 use dashmap::DashMap;
-use std::sync::Arc;
 use swc_atoms::JsWord;
 use swc_common::{SourceFile, SyntaxContext};
 use swc_ecma_ast::{Ident, Lit};

@@ -3,20 +3,20 @@
 #![feature(specialization)]
 
 pub use self::scope::{Id, ModuleId, QualifiedId};
-use self::{analysis::ImportInfo, loader::Load, scope::Scope};
-use anyhow::Error;
-use dashmap::DashMap;
+use self::{analysis::ImportInfo, load::Load, scope::Scope};
+use crate::resolve::Resolve;
+use anyhow::{Context, Error};
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{errors::Handler, FileName, SourceFile, SourceMap, SyntaxContext};
-use swc_ecma_ast::{Lit, Module, Program, Str};
+use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
+use swc_ecma_ast::{Module, Program, Str};
 
 mod analysis;
-pub mod loader;
-pub mod plugin;
+pub mod load;
+pub mod resolve;
 mod scope;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +32,8 @@ pub struct Bundler {
     swc: swc::Compiler,
     swc_options: Arc<swc::config::Options>,
 
-    module_loader: Box<dyn Load + Sync>,
+    resolver: Box<dyn Resolve + Sync>,
+    loader: Box<dyn Load + Sync>,
 
     scope: Scope,
 }
@@ -43,14 +44,16 @@ impl Bundler {
         handler: Arc<Handler>,
         working_dir: PathBuf,
         swc: Arc<swc::config::Options>,
-        module_loader: Box<dyn Load + Sync>,
+        resolver: Box<dyn Resolve + Sync>,
+        loader: Box<dyn Load + Sync>,
     ) -> Self {
         Bundler {
             working_dir,
             config: Config { tree_shake: true },
             swc: swc::Compiler::new(cm, handler),
             swc_options: swc,
-            module_loader,
+            loader,
+            resolver,
             scope: Default::default(),
         }
     }
@@ -163,15 +166,23 @@ impl Bundler {
             FileName::Real(ref path) => path,
             _ => unreachable!(),
         };
-        let (fm, module) = self.module_loader.load(&base, &s.value)?;
+        let (fm, module) = self.load(&base, &s.value)?;
         let module = self.transform_module(fm.clone(), module)?;
 
         Ok((fm, module))
     }
 
     fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
-        self.module_loader
-            .load(&self.working_dir, &path.as_os_str().to_string_lossy())
+        self.load(&self.working_dir, &path.as_os_str().to_string_lossy())
+    }
+
+    fn load(&self, base: &Path, s: &str) -> Result<(Arc<SourceFile>, Module), Error> {
+        let path = self
+            .resolver
+            .resolve(base, s)
+            .context("failed to resolve")?;
+
+        self.loader.load(path).context("failed to load")
     }
 
     pub fn swc(&self) -> &swc::Compiler {

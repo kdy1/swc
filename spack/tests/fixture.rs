@@ -5,7 +5,7 @@
 
 extern crate test;
 
-use spack::{loader::Resolver, Bundler};
+use spack::Bundler;
 use std::{
     env,
     fs::{create_dir_all, read_dir},
@@ -108,12 +108,8 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     handler.clone(),
                     env::current_dir().unwrap(),
                     options.clone(),
-                    box spack::loader::JsLoader::new(
-                        cm.clone(),
-                        handler.clone(),
-                        options.clone(),
-                        Resolver {},
-                    ),
+                    box spack::resolve::NodeResolver,
+                    box spack::load::JsLoader::new(cm.clone(), handler.clone(), options.clone()),
                 );
 
                 assert_ne!(entries.len(), 0);
