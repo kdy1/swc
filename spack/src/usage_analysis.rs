@@ -95,6 +95,28 @@ impl UsageTracker {
     }
 }
 
+impl Fold<ExportDecl> for UsageTracker {
+    fn fold(&mut self, mut node: ExportDecl) -> ExportDecl {
+        if self.is_marked(node.span) {
+            return node;
+        }
+        // TODO: Export only when it's required. (i.e. check self.changes)
+
+        node.span = node.span.apply_mark(self.mark);
+
+        let old = self.marking_phase;
+        self.marking_phase = true;
+        node.decl = node.decl.fold_with(self);
+        self.marking_phase = old;
+
+        node
+    }
+}
+
+//impl Fold<ExportDefaultExpr> for UsageTracker {}
+//
+//impl Fold<ExportSpecifier> for UsageTracker {}
+
 impl Fold<ExprStmt> for UsageTracker {
     fn fold(&mut self, node: ExprStmt) -> ExprStmt {
         if node.expr.may_have_side_effects() {
