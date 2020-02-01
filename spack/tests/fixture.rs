@@ -135,9 +135,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     };
 
                     let output_path = entry.path().join("output").join(name.file_name().unwrap());
-                    let output_fm = cm
-                        .load_file(&output_path)
-                        .expect("failed to load output file");
+
                     let program = bundler
                         .swc()
                         .parse_js(fm, Default::default(), Default::default(), true, true)

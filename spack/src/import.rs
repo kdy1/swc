@@ -1,8 +1,7 @@
 use super::Bundler;
-use crate::Id;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith, DUMMY_SP};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith};
 use swc_ecma_ast::*;
 use swc_ecma_utils::find_ids;
 
@@ -12,26 +11,15 @@ impl Bundler {
     /// remain as-is.
     ///
     /// This method also drops empty statements from the module.
-    pub(super) fn extract_info(&self, module: &mut Module) -> ModuleInfo {
+    pub(super) fn extract_import_info(&self, module: &mut Module) -> ImportInfo {
         let body = replace(&mut module.body, vec![]);
 
-        let mut v = Finder::default();
+        let mut v = ImportFinder::default();
         let body = body.fold_with(&mut v);
         module.body = body;
 
         v.info
     }
-}
-
-#[derive(Debug, Default)]
-pub(super) struct ModuleInfo {
-    pub imports: ImportInfo,
-    pub exports: ExportInfo,
-}
-
-#[derive(Debug, Default)]
-pub(super) struct ExportInfo {
-    pub pure_constants: Vec<(Id, Lit)>,
 }
 
 #[derive(Debug, Default)]
@@ -43,11 +31,11 @@ pub(super) struct ImportInfo {
 }
 
 #[derive(Default)]
-struct Finder {
-    info: ModuleInfo,
+struct ImportFinder {
+    info: ImportInfo,
 }
 
-impl Fold<Vec<ModuleItem>> for Finder {
+impl Fold<Vec<ModuleItem>> for ImportFinder {
     fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
         items.move_flat_map(|item| {
             //
@@ -56,7 +44,7 @@ impl Fold<Vec<ModuleItem>> for Finder {
                 ModuleItem::Stmt(Stmt::Empty(..)) => None,
 
                 ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
-                    self.info.imports.imports.push(i);
+                    self.info.imports.push(i);
                     None
                 }
 
@@ -66,51 +54,7 @@ impl Fold<Vec<ModuleItem>> for Finder {
     }
 }
 
-impl Fold<ModuleItem> for Finder {
-    fn fold(&mut self, item: ModuleItem) -> ModuleItem {
-        match item {
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
-                decl: Decl::Var(v),
-                ..
-            })) if v.kind == VarDeclKind::Const
-                && v.decls.iter().all(|v| {
-                    (match v.name {
-                        Pat::Ident(..) => true,
-                        _ => false,
-                    }) && (match v.init {
-                        Some(box Expr::Lit(..)) => true,
-                        _ => false,
-                    })
-                }) =>
-            {
-                self.info
-                    .exports
-                    .pure_constants
-                    .extend(v.decls.into_iter().map(|decl| {
-                        let id = match decl.name {
-                            Pat::Ident(i) => i.into(),
-                            _ => unreachable!(),
-                        };
-
-                        let lit = match decl.init {
-                            Some(box Expr::Lit(l)) => l,
-                            _ => unreachable!(),
-                        };
-
-                        (id, lit)
-                    }));
-
-                return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }));
-            }
-
-            _ => {}
-        }
-
-        item.fold_children(self)
-    }
-}
-
-impl Fold<CallExpr> for Finder {
+impl Fold<CallExpr> for ImportFinder {
     fn fold(&mut self, node: CallExpr) -> CallExpr {
         if node.args.len() != 1 {
             return node.fold_children(self);
@@ -128,7 +72,7 @@ impl Fold<CallExpr> for Finder {
                 sym: js_word!("require"),
                 ..
             })) => {
-                self.info.imports.requires.push(src.clone());
+                self.info.requires.push(src.clone());
                 return node;
             }
 
@@ -136,7 +80,7 @@ impl Fold<CallExpr> for Finder {
                 sym: js_word!("import"),
                 ..
             })) => {
-                self.info.imports.dynamic_imports.push(src.clone());
+                self.info.dynamic_imports.push(src.clone());
                 return node;
             }
 
@@ -156,7 +100,7 @@ impl Fold<CallExpr> for Finder {
 ///  ```js
 /// import { readFile } from 'fs';
 /// ```
-impl Fold<VarDeclarator> for Finder {
+impl Fold<VarDeclarator> for ImportFinder {
     fn fold(&mut self, node: VarDeclarator) -> VarDeclarator {
         match node.init {
             Some(box Expr::Call(CallExpr {
@@ -179,7 +123,7 @@ impl Fold<VarDeclarator> for Finder {
 
                 let ids: Vec<Ident> = find_ids(&node.name);
 
-                self.info.imports.partial_requires.push(ImportDecl {
+                self.info.partial_requires.push(ImportDecl {
                     span,
                     specifiers: ids
                         .into_iter()

@@ -56,9 +56,7 @@ impl Bundler {
     ) -> Result<TransformedModule, Error> {
         log::trace!("transform_module({})", fm.name);
 
-        let info = self.extract_info(&mut module);
-        self.store_pure_constants(id, info.exports.pure_constants);
-        let imports = info.imports;
+        let imports = self.extract_import_info(&mut module);
 
         let (module, deps) = rayon::join(
             || -> Result<_, Error> {

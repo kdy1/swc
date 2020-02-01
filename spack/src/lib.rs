@@ -3,10 +3,9 @@
 #![feature(specialization)]
 
 pub use self::id::{Id, ModuleId, QualifiedId};
-use self::{import_export::ImportInfo, load::Load, scope::Scope};
-use crate::{id::ModuleIdGenerator, resolve::Resolve, transform::TransformedModule};
+use self::{import::ImportInfo, load::Load, scope::Scope};
+use crate::{id::ModuleIdGenerator, resolve::Resolve};
 use anyhow::Error;
-use dashmap::DashMap;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
@@ -15,8 +14,9 @@ use std::{
 use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 
+mod export;
 mod id;
-mod import_export;
+mod import;
 pub mod load;
 pub mod resolve;
 mod scope;

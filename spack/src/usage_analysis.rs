@@ -2,7 +2,7 @@ use crate::Bundler;
 use std::mem::replace;
 use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{find_ids, DestructuringFinder, ExprExt, StmtLike};
+use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
@@ -44,7 +44,7 @@ where
         self.pass_cnt += 1;
         let mut items = items.fold_children(self);
 
-        let mut len = 0;
+        let mut len;
         loop {
             if self.changed.is_some() && self.changed.as_ref().unwrap().is_empty() {
                 break;
