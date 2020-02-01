@@ -151,7 +151,10 @@ impl Bundler {
             _ => unreachable!(),
         };
 
-        self.module_loader.load(&base, &s.value)
+        let (fm, module) = self.module_loader.load(&base, &s.value)?;
+        let module = self.transform_module(fm.clone(), module)?;
+
+        Ok((fm, module))
     }
 
     pub fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
