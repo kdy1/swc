@@ -10,7 +10,7 @@ use swc_ecma_ast::{Module, Program};
 pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<ImportInfo>);
 
 impl Bundler {
-    /// Phase 1 (discovery) and Phase 2 (linking)
+    /// Phase 1 (discovery)
     ///
     /// We apply transforms at this phase to make cache efficient.
     /// As we cache in this phase, changing dependency does not affect cache.  
