@@ -2,19 +2,22 @@
 #![feature(box_patterns)]
 #![feature(specialization)]
 
-use crate::{analysis::ImportInfo, loader::Load};
+pub use self::scope::{Id, ModuleId, QualifiedId};
+use self::{analysis::ImportInfo, loader::Load, scope::Scope};
 use anyhow::Error;
+use dashmap::DashMap;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
-use swc_ecma_ast::{Module, Program, Str};
+use swc_common::{errors::Handler, FileName, SourceFile, SourceMap, SyntaxContext};
+use swc_ecma_ast::{Lit, Module, Program, Str};
 
 mod analysis;
 pub mod loader;
 pub mod plugin;
+mod scope;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -30,6 +33,8 @@ pub struct Bundler {
     jsc_options: Arc<swc::config::Options>,
 
     module_loader: Box<dyn Load + Sync>,
+
+    scope: Scope,
 }
 
 impl Bundler {
@@ -46,6 +51,7 @@ impl Bundler {
             jsc: swc::Compiler::new(cm, handler),
             jsc_options: swc,
             module_loader,
+            scope: Default::default(),
         }
     }
 
