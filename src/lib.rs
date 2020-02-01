@@ -20,7 +20,7 @@ use common::{
 };
 use ecmascript::{
     ast::Program,
-    codegen::{self, Emitter},
+    codegen::{self, Emitter, Node},
     parser::{lexer::Lexer, Parser, Session as ParseSess, Syntax},
     transforms::{
         helpers::{self, Helpers},
@@ -123,13 +123,16 @@ impl Compiler {
         })
     }
 
-    pub fn print(
+    pub fn print<T>(
         &self,
-        program: &Program,
+        node: &T,
         fm: Arc<SourceFile>,
         source_map: bool,
         minify: bool,
-    ) -> Result<TransformOutput, Error> {
+    ) -> Result<TransformOutput, Error>
+    where
+        T: Node,
+    {
         self.run(|| {
             let mut src_map_builder = SourceMapBuilder::new(None);
 
@@ -162,8 +165,7 @@ impl Compiler {
                         handlers,
                     };
 
-                    emitter
-                        .emit_program(&program)
+                    node.emit_with(&mut emitter)
                         .map_err(|err| Error::FailedToEmitModule { err })?;
                 }
                 // Invalid utf8 is valid in javascript world.
