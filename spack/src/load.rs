@@ -1,20 +1,23 @@
 use anyhow::Error;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use swc_common::{errors::Handler, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program};
 
 pub trait Load {
-    fn load(&self, path: PathBuf) -> Result<(Arc<SourceFile>, Module), Error>;
+    fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error>;
 }
 
 impl<T: ?Sized + Load> Load for Box<T> {
-    fn load(&self, path: PathBuf) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
         T::load(self, path)
     }
 }
 
 impl<'a, T: ?Sized + Load> Load for &'a T {
-    fn load(&self, path: PathBuf) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
         T::load(self, path)
     }
 }
@@ -39,10 +42,10 @@ impl JsLoader {
 }
 
 impl Load for JsLoader {
-    fn load(&self, path: PathBuf) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
         log::debug!("JsLoader.load({})", path.display());
 
-        let fm = self.compiler.cm.load_file(&path)?;
+        let fm = self.compiler.cm.load_file(path)?;
 
         log::trace!("JsLoader.load: loaded");
 
