@@ -2,7 +2,7 @@
 #![feature(box_patterns)]
 #![feature(specialization)]
 
-use crate::loader::Load;
+use crate::{import::ImportInfo, loader::Load};
 use anyhow::Error;
 use derive_builder::Builder;
 use rayon::prelude::*;
@@ -10,8 +10,8 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::SourceFile;
-use swc_ecma_ast::{Module, Program};
+use swc_common::{FileName, SourceFile};
+use swc_ecma_ast::{Module, Program, Str};
 
 mod import;
 pub mod loader;
@@ -52,7 +52,7 @@ impl Bundler {
         let imports = self.extract_imports(&mut module);
 
         let (module, deps) = rayon::join(
-            || {
+            || -> Result<_, Error> {
                 // Process module
                 let config = self.jsc.config_for_file(&self.jsc_options, &*fm)?;
 
@@ -68,20 +68,77 @@ impl Bundler {
             },
             || {
                 // Load dependencies
-                imports.into_par_iter()
+                self.load_imports(&fm.name, imports)
             },
         );
 
+        deps?;
         let module = module?;
 
         Ok(module)
     }
 
+    fn load_imports(&self, base: &FileName, info: ImportInfo) -> Result<(), Error> {
+        let ImportInfo {
+            imports,
+            requires,
+            partial_requires,
+            dynamic_imports,
+        } = info;
+
+        let ((a, b), (c, d)) = rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        // imports
+                        imports
+                            .into_par_iter()
+                            .map(|import| self.load_dep(base, &import.src))
+                            .collect::<Vec<_>>()
+                    },
+                    || {
+                        // Partial requires
+                        partial_requires
+                            .into_par_iter()
+                            .map(|require| self.load_dep(base, &require.src))
+                            .collect::<Vec<_>>()
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        // Requires
+                        requires
+                            .into_par_iter()
+                            .map(|require| self.load_dep(base, &require))
+                            .collect::<Vec<_>>()
+                    },
+                    || {
+                        // Dynamic imports
+                        dynamic_imports
+                            .into_par_iter()
+                            .map(|require| self.load_dep(base, &require))
+                            .collect::<Vec<_>>()
+                    },
+                )
+            },
+        );
+
+        Ok(())
+    }
+
+    pub fn load_dep(&self, base: &FileName, s: &Str) -> Result<(Arc<SourceFile>, Module), Error> {
+        let base = match base {
+            FileName::Real(ref path) => path,
+            _ => unreachable!(),
+        };
+
+        self.module_loader.load(&base, &s.value)
+    }
+
     pub fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
-        self.module_loader.load(
-            &self.jsc.cm,
-            &self.working_dir,
-            &path.as_os_str().to_string_lossy(),
-        )
+        self.module_loader
+            .load(&self.working_dir, &path.as_os_str().to_string_lossy())
     }
 }
