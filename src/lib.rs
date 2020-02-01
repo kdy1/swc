@@ -127,7 +127,6 @@ impl Compiler {
         &self,
         program: &Program,
         fm: Arc<SourceFile>,
-        comments: &Comments,
         source_map: bool,
         minify: bool,
     ) -> Result<TransformOutput, Error> {
@@ -148,7 +147,7 @@ impl Compiler {
                     let handlers = box MyHandlers;
                     let mut emitter = Emitter {
                         cfg: codegen::Config { minify },
-                        comments: if minify { None } else { Some(&comments) },
+                        comments: if minify { None } else { Some(&self.comments) },
                         cm: self.cm.clone(),
                         wr: box codegen::text_writer::JsWriter::new(
                             self.cm.clone(),
@@ -333,13 +332,7 @@ impl Compiler {
             )?;
             let module = self.transform(module, config.external_helpers, config.pass);
 
-            self.print(
-                &module,
-                fm,
-                &self.comments,
-                config.source_maps,
-                config.minify,
-            )
+            self.print(&module, fm, config.source_maps, config.minify)
         })
     }
 }

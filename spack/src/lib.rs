@@ -49,14 +49,14 @@ impl Bundler {
         }
     }
 
-    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<Module, Error>> {
+    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
         entries
             .into_par_iter()
-            .map(|entry| -> Result<Module, Error> {
+            .map(|entry| -> Result<_, Error> {
                 let (fm, module) = self.load_entry_file(entry)?;
                 let module = self.transform_module(fm.clone(), module)?;
 
-                Ok(module)
+                Ok((fm, module))
             })
             .collect()
     }
@@ -153,5 +153,9 @@ impl Bundler {
     pub fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
         self.module_loader
             .load(&self.working_dir, &path.as_os_str().to_string_lossy())
+    }
+
+    pub fn jsc(&self) -> &swc::Compiler {
+        &self.jsc
     }
 }

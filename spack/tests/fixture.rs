@@ -105,6 +105,15 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
                 let modules = bundler.bundle(&entries);
 
+                for (entry, module) in entries.into_iter().zip(modules) {
+                    let (fm, module) = module.expect("failed to bundle module");
+
+                    let output =
+                        bundler
+                            .jsc()
+                            .print(&Program::Module(module), fm.clone(), false, false);
+                }
+
                 Ok(())
             })
             .expect("failed to process a module");
