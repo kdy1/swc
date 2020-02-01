@@ -12,6 +12,7 @@ impl Bundler {
     /// Phase 1 (discovery) and Phase 2 (linking)
     ///
     /// We apply transforms at this phase to make cache efficient.
+    /// As we cache in this phase, changing dependency does not affect cache.  
     pub(super) fn load_transformed(
         &self,
         base: &Path,
