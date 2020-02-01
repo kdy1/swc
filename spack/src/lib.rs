@@ -103,7 +103,7 @@ impl Bundler {
             dynamic_imports,
         } = info;
 
-        let ((a, b), (c, d)) = rayon::join(
+        rayon::join(
             || {
                 rayon::join(
                     || {
@@ -141,11 +141,10 @@ impl Bundler {
                 )
             },
         );
-
         Ok(())
     }
 
-    pub fn load_dep(&self, base: &FileName, s: &Str) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load_dep(&self, base: &FileName, s: &Str) -> Result<(Arc<SourceFile>, Module), Error> {
         let base = match base {
             FileName::Real(ref path) => path,
             _ => unreachable!(),
@@ -157,7 +156,7 @@ impl Bundler {
         Ok((fm, module))
     }
 
-    pub fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
         self.module_loader
             .load(&self.working_dir, &path.as_os_str().to_string_lossy())
     }
