@@ -87,18 +87,19 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
         add_test(tests, name, ignore, move || {
             eprintln!("\n\n========== Running reference test {}\n", dir_name);
 
-            let options = Arc::new(Default::default());
+            let options = Arc::new(swc::config::Options::default());
             testing::run_test2(true, |cm, handler| {
+                let handler = Arc::new(handler);
                 let bundler = Bundler::new(
-                    cm,
-                    Arc::new(handler),
+                    cm.clone(),
+                    handler.clone(),
                     env::current_dir().unwrap(),
                     options.clone(),
                     box spack::loader::JsLoader::new(
                         cm.clone(),
                         handler.clone(),
                         options.clone(),
-                        Resolver,
+                        Resolver {},
                     ),
                 );
 
