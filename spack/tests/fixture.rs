@@ -14,7 +14,6 @@ use std::{
     sync::Arc,
 };
 use swc_common::FileName;
-use swc_ecma_ast::*;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
@@ -121,7 +120,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
                     let code = bundler
                         .swc()
-                        .print(&Program::Module(module), fm.clone(), false, false)
+                        .print(&*module, fm.clone(), false, false)
                         .expect("failed to emit bundle")
                         .code;
 
