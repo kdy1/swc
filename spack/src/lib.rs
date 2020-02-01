@@ -36,7 +36,7 @@ pub struct Bundler {
 }
 
 impl Bundler {
-    pub fn build(&self, entries: &[PathBuf]) -> Vec<Result<Module, Error>> {
+    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<Module, Error>> {
         entries
             .into_par_iter()
             .map(|entry| -> Result<Module, Error> {
