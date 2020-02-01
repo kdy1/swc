@@ -43,7 +43,7 @@ pub struct Compiler {
     globals: Globals,
     /// CodeMap
     pub cm: Arc<SourceMap>,
-    pub handler: Handler,
+    pub handler: Arc<Handler>,
     comments: Comments,
 }
 
@@ -191,7 +191,7 @@ impl Compiler {
 
 /// High-level apis.
 impl Compiler {
-    pub fn new(cm: Arc<SourceMap>, handler: Handler) -> Self {
+    pub fn new(cm: Arc<SourceMap>, handler: Arc<Handler>) -> Self {
         Compiler {
             cm,
             handler,
