@@ -21,7 +21,9 @@ swc = { path = "../" }
 anyhow = "1"
 dashmap = "3.4.0"
 rayon = "1"
+log = "0.4.8"
 
 [dev-dependencies]
 testing = { path = "../testing" }
 walkdir = "2.3.1"
+pretty_env_logger = "0.3"

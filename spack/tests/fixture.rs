@@ -150,6 +150,8 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
 #[test]
 fn pass() {
+    let _ = pretty_env_logger::try_init();
+
     let args: Vec<_> = env::args().collect();
     let mut tests = Vec::new();
     reference_tests(&mut tests, false).unwrap();
@@ -158,6 +160,8 @@ fn pass() {
 
 #[test]
 fn errors() {
+    let _ = pretty_env_logger::try_init();
+
     let args: Vec<_> = env::args().collect();
     let mut tests = Vec::new();
     reference_tests(&mut tests, true).unwrap();
