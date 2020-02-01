@@ -81,12 +81,6 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     {
                         true
                     } else {
-                        println!("Path: {}", e.path().display());
-                        println!(
-                            "FileName: {}",
-                            e.path().file_name().unwrap().to_string_lossy()
-                        );
-
                         false
                     }
                 }
