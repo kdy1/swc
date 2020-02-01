@@ -2,7 +2,7 @@ use crate::Bundler;
 use std::mem::replace;
 use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
-use swc_ecma_utils::StmtLike;
+use swc_ecma_utils::{find_ids, DestructuringFinder, ExprExt, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
@@ -14,6 +14,7 @@ impl Bundler {
             pass_cnt: 0,
             mark: self.used_mark,
             changed: used_exports,
+            marking_phase: false,
         };
 
         node.fold_with(&mut v)
@@ -27,12 +28,14 @@ pub(super) struct UsageTracker {
     mark: Mark,
     /// If it's none, all statement with side-effect will marked as used.
     changed: Option<Vec<Ident>>,
+
+    /// If true, idents are added to [changed].
+    marking_phase: bool,
 }
 
 impl<T> Fold<Vec<T>> for UsageTracker
 where
-    T: StmtLike,
-    T: FoldWith<Self>,
+    T: StmtLike + FoldWith<Self> + Spanned,
 {
     fn fold(&mut self, items: Vec<T>) -> Vec<T> {
         let parent_cnt = self.pass_cnt;
@@ -41,17 +44,32 @@ where
         self.pass_cnt += 1;
         let mut items = items.fold_children(self);
 
+        let mut len = 0;
         loop {
             if self.changed.is_some() && self.changed.as_ref().unwrap().is_empty() {
                 break;
             }
 
             self.pass_cnt += 1;
-            self.changed = Some(vec![]);
-            items = items.fold_children(self)
+            len = self.changed.as_ref().map(|v| v.len()).unwrap_or(0);
+            log::debug!("changed = {:?}", self.changed);
+            if self.changed.is_none() {
+                self.changed = Some(vec![]);
+            }
+            items = items.fold_children(self);
+            if len == self.changed.as_ref().unwrap().len() {
+                break;
+            }
         }
 
         log::debug!("Ran UsageTracker for {} times", self.pass_cnt);
+
+        items = items.move_flat_map(|item| {
+            if !self.is_marked(item.span()) {
+                return None;
+            }
+            Some(item)
+        });
 
         self.changed = upper_changed;
         self.pass_cnt = parent_cnt;
@@ -75,6 +93,80 @@ impl UsageTracker {
                 return true;
             }
         }
+    }
+}
+
+impl Fold<ExprStmt> for UsageTracker {
+    fn fold(&mut self, node: ExprStmt) -> ExprStmt {
+        if node.expr.may_have_side_effects() {
+            log::trace!("UsageTracker: ExprStmt: Entering marking phase");
+
+            let old = self.marking_phase;
+            self.marking_phase = true;
+            let stmt = ExprStmt {
+                span: node.span.apply_mark(self.mark),
+                expr: node.expr.fold_children(self),
+            };
+            self.marking_phase = old;
+            return stmt;
+        }
+
+        node.fold_children(self)
+    }
+}
+
+impl Fold<Ident> for UsageTracker {
+    fn fold(&mut self, i: Ident) -> Ident {
+        if self.is_marked(i.span) {
+            return i;
+        }
+
+        if self.marking_phase {
+            if let Some(ref mut vec) = self.changed {
+                log::debug!("UsageTracker: Marking {} as used", i.sym);
+                vec.push(i.clone());
+            }
+        }
+
+        i
+    }
+}
+
+impl Fold<VarDecl> for UsageTracker {
+    fn fold(&mut self, var: VarDecl) -> VarDecl {
+        let var: VarDecl = var.fold_children(self);
+
+        if let Some(ref idents) = self.changed {
+            if idents.is_empty() {
+                return var;
+            }
+
+            let ids: Vec<Ident> = find_ids(&var.decls);
+
+            for i in ids {
+                for i1 in idents {
+                    if i1.sym == i.sym {
+                        return VarDecl {
+                            span: var.span.apply_mark(self.mark),
+                            ..var
+                        };
+                    }
+                }
+            }
+        }
+
+        var
+    }
+}
+
+impl Fold<MemberExpr> for UsageTracker {
+    fn fold(&mut self, mut e: MemberExpr) -> MemberExpr {
+        e.obj = e.obj.fold_with(self);
+        if e.computed {
+            e.prop = e.prop.fold_with(self);
+        }
+
+        e
     }
 }
 
