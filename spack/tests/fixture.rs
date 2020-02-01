@@ -5,7 +5,7 @@
 
 extern crate test;
 
-use spack::{Bundler, Config};
+use spack::{loader::Resolver, Bundler, Config};
 use std::{
     env,
     fs::{read_dir, File},
@@ -92,7 +92,8 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     cm,
                     Arc::new(handler),
                     env::current_dir().unwrap(),
-                    spack::loader::FileLoader,
+                    Arc::new(Default::default()),
+                    box spack::loader::JsLoader::new(cm.clone(), handler.clone(), Resolver),
                 );
 
                 let modules = bundler.bundle(&entries);

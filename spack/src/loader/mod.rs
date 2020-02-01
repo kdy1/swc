@@ -1,6 +1,6 @@
 use anyhow::Error;
 use std::{path::Path, sync::Arc};
-use swc_common::{FileName, SourceFile};
+use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program};
 
 /// Implementors of [Load] should not try parallel loading.
@@ -25,6 +25,21 @@ pub struct JsLoader<R = Resolver> {
     compiler: swc::Compiler,
     options: Arc<swc::config::Options>,
     resolver: R,
+}
+
+impl<R> JsLoader<R> {
+    pub fn new(
+        cm: Arc<SourceMap>,
+        handler: Arc<Handler>,
+        options: Arc<swc::config::Options>,
+        resolver: R,
+    ) -> Self {
+        JsLoader {
+            compiler: swc::Compiler::new(cm, handler),
+            options,
+            resolver,
+        }
+    }
 }
 
 impl<R> Load for JsLoader<R> {
