@@ -125,7 +125,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
                 let modules = bundler.bundle(&entries);
 
-                for (e, bundled) in entries.into_iter().zip(modules) {
+                for bundled in modules {
                     let (fm, module) = bundled.expect("failed to bundle module");
 
                     let code = bundler
