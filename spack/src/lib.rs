@@ -3,14 +3,11 @@
 #![feature(specialization)]
 
 pub use self::id::{Id, ModuleId, QualifiedId};
-use self::{import::ImportInfo, load::Load, scope::Scope};
+use self::{load::Load, scope::Scope};
 use crate::{id::ModuleIdGenerator, resolve::Resolve};
 use anyhow::Error;
 use rayon::prelude::*;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 
@@ -73,7 +70,7 @@ impl Bundler {
         entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
-                let (_, fm, module) =
+                let (_, fm, module, imports) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
 
                 let module = self.mark_all_as_used((*module).clone())?;
@@ -87,57 +84,6 @@ impl Bundler {
         let module = self.drop_unused(module, None);
 
         Ok(module)
-    }
-
-    fn load_imports(&self, base: &Path, info: &ImportInfo) -> Result<(), Error> {
-        log::trace!("load_imports({})", base.display());
-
-        let ImportInfo {
-            imports,
-            requires,
-            partial_requires,
-            dynamic_imports,
-        } = info;
-
-        rayon::join(
-            || {
-                rayon::join(
-                    || {
-                        // imports
-                        imports
-                            .into_par_iter()
-                            .map(|import| self.load_transformed(base, &import.src.value))
-                            .collect::<Vec<_>>()
-                    },
-                    || {
-                        // Partial requires
-                        partial_requires
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.src.value))
-                            .collect::<Vec<_>>()
-                    },
-                )
-            },
-            || {
-                rayon::join(
-                    || {
-                        // Requires
-                        requires
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.value))
-                            .collect::<Vec<_>>()
-                    },
-                    || {
-                        // Dynamic imports
-                        dynamic_imports
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.value))
-                            .collect::<Vec<_>>()
-                    },
-                )
-            },
-        );
-        Ok(())
     }
 
     pub fn swc(&self) -> &swc::Compiler {

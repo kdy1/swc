@@ -1,12 +1,13 @@
 use super::Bundler;
-use crate::ModuleId;
+use crate::{import::ImportInfo, ModuleId};
 use anyhow::{Context, Error};
+use rayon::prelude::*;
 use std::{path::Path, sync::Arc};
 use swc_common::{FileName, SourceFile};
 use swc_ecma_ast::{Module, Program};
 
 /// Module after applying transformations.
-pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>);
+pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<ImportInfo>);
 
 impl Bundler {
     /// Phase 1 (discovery) and Phase 2 (linking)
@@ -93,6 +94,57 @@ impl Bundler {
         deps?;
         let module = Arc::new(module?);
 
-        Ok((id, fm, module))
+        Ok((id, fm, module, Arc::new(imports)))
+    }
+
+    fn load_imports(&self, base: &Path, info: &ImportInfo) -> Result<(), Error> {
+        log::trace!("load_imports({})", base.display());
+
+        let ImportInfo {
+            imports,
+            requires,
+            partial_requires,
+            dynamic_imports,
+        } = info;
+
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        // imports
+                        imports
+                            .into_par_iter()
+                            .map(|import| self.load_transformed(base, &import.src.value))
+                            .collect::<Vec<_>>()
+                    },
+                    || {
+                        // Partial requires
+                        partial_requires
+                            .into_par_iter()
+                            .map(|require| self.load_transformed(base, &require.src.value))
+                            .collect::<Vec<_>>()
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        // Requires
+                        requires
+                            .into_par_iter()
+                            .map(|require| self.load_transformed(base, &require.value))
+                            .collect::<Vec<_>>()
+                    },
+                    || {
+                        // Dynamic imports
+                        dynamic_imports
+                            .into_par_iter()
+                            .map(|require| self.load_transformed(base, &require.value))
+                            .collect::<Vec<_>>()
+                    },
+                )
+            },
+        );
+        Ok(())
     }
 }
