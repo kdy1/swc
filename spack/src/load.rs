@@ -1,8 +1,5 @@
 use anyhow::Error;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use swc_common::{errors::Handler, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program};
 

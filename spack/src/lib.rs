@@ -2,10 +2,11 @@
 #![feature(box_patterns)]
 #![feature(specialization)]
 
-pub use self::scope::{Id, ModuleId, QualifiedId};
+pub use self::id::{Id, ModuleId, QualifiedId};
 use self::{analysis::ImportInfo, load::Load, scope::Scope};
-use crate::resolve::Resolve;
+use crate::{id::ModuleIdGenerator, resolve::Resolve};
 use anyhow::{Context, Error};
+use dashmap::DashMap;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
@@ -15,6 +16,7 @@ use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program, Str};
 
 mod analysis;
+mod id;
 pub mod load;
 pub mod resolve;
 mod scope;
@@ -31,6 +33,9 @@ pub struct Bundler {
     /// Javascript compiler.
     swc: swc::Compiler,
     swc_options: Arc<swc::config::Options>,
+
+    module_id_gen: ModuleIdGenerator,
+    module_ids: DashMap<Arc<PathBuf>, ModuleId>,
 
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
@@ -55,6 +60,8 @@ impl Bundler {
             loader,
             resolver,
             scope: Default::default(),
+            module_id_gen: Default::default(),
+            module_ids: Default::default(),
         }
     }
 
@@ -182,7 +189,7 @@ impl Bundler {
             .resolve(base, s)
             .context("failed to resolve")?;
 
-        self.loader.load(path).context("failed to load")
+        self.loader.load(&path).context("failed to load")
     }
 
     pub fn swc(&self) -> &swc::Compiler {
