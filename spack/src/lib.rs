@@ -36,7 +36,6 @@ pub struct Bundler {
     swc_options: Arc<swc::config::Options>,
 
     module_id_gen: ModuleIdGenerator,
-    cache: DashMap<Arc<PathBuf>, TransformedModule>,
 
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
@@ -62,7 +61,6 @@ impl Bundler {
             resolver,
             scope: Default::default(),
             module_id_gen: Default::default(),
-            cache: Default::default(),
         }
     }
 

@@ -22,7 +22,7 @@ impl Bundler {
             .resolve(base, s)
             .context("failed to resolve")?;
 
-        if let Some(cached) = self.cache.get(&path) {
+        if let Some(cached) = self.scope.cache.get(&path) {
             return Ok(cached.clone());
         }
 
@@ -32,7 +32,7 @@ impl Bundler {
             .transform_module(id, fm.clone(), module)
             .context("failed to transform module")?;
 
-        self.cache.insert(Arc::new(path), v.clone());
+        self.scope.cache.insert(Arc::new(path), v.clone());
 
         Ok(v)
     }
