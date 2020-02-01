@@ -5,12 +5,13 @@
 
 extern crate test;
 
-use spack::{BundlerBuilder, Config};
+use spack::{Bundler, Config};
 use std::{
     env,
     fs::{read_dir, File},
     io::{self, Read},
     path::Path,
+    sync::Arc,
 };
 use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
@@ -87,11 +88,12 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
             eprintln!("\n\n========== Running reference test {}\n", dir_name);
 
             testing::run_test2(true, |cm, handler| {
-                let bundler = BundlerBuilder::default()
-                    .working_dir(std::env::current_dir().unwrap())
-                    .config(Config { tree_shake: true })
-                    .build()
-                    .expect("failed to create bundler");
+                let bundler = Bundler::new(
+                    cm,
+                    Arc::new(handler),
+                    env::current_dir().unwrap(),
+                    spack::loader::FileLoader,
+                );
 
                 let modules = bundler.bundle(&entries);
 

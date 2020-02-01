@@ -4,13 +4,12 @@
 
 use crate::{import::ImportInfo, loader::Load};
 use anyhow::Error;
-use derive_builder::Builder;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{FileName, SourceFile};
+use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program, Str};
 
 mod import;
@@ -22,20 +21,34 @@ pub struct Config {
     pub tree_shake: bool,
 }
 
-#[derive(Builder)]
-#[builder(pattern = "owned")]
 pub struct Bundler {
     working_dir: PathBuf,
     config: Config,
 
     /// Javascript compiler.
     jsc: swc::Compiler,
-    jsc_options: swc::config::Options,
+    jsc_options: Arc<swc::config::Options>,
 
     module_loader: Box<dyn Load + Sync>,
 }
 
 impl Bundler {
+    pub fn new(
+        cm: Arc<SourceMap>,
+        handler: Arc<Handler>,
+        working_dir: PathBuf,
+        swc: Arc<swc::config::Options>,
+        module_loader: Box<dyn Load + Sync>,
+    ) -> Self {
+        Bundler {
+            working_dir,
+            config: Config { tree_shake: true },
+            jsc: swc::Compiler::new(cm, handler),
+            jsc_options: swc,
+            module_loader,
+        }
+    }
+
     pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<Module, Error>> {
         entries
             .into_par_iter()

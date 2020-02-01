@@ -14,11 +14,11 @@ edition = "2018"
 swc_atoms = { path = "../atoms" }
 swc_common = { path = "../common" }
 swc_ecma_ast = { path = "../ecmascript/ast", features = ["fold"] }
+swc_ecma_parser = { path = "../ecmascript/parser", features = ["verify"] }
 swc_ecma_utils = { path = "../ecmascript/utils" }
 swc = { path = "../" }
 
 anyhow = "1"
-derive_builder = "0.9"
 rayon = "1"
 
 [dev-dependencies]

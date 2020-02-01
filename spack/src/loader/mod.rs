@@ -1,7 +1,7 @@
 use anyhow::Error;
 use std::{path::Path, sync::Arc};
-use swc_common::SourceFile;
-use swc_ecma_ast::Module;
+use swc_common::{FileName, SourceFile};
+use swc_ecma_ast::{Module, Program};
 
 /// Implementors of [Load] should not try parallel loading.
 pub trait Load {
@@ -20,8 +20,32 @@ impl<'a, T: ?Sized + Load> Load for &'a mut T {
     }
 }
 
-struct Resolver<L: Load> {
-    inner: L,
+/// JavaScript loader
+pub struct JsLoader<R = Resolver> {
+    compiler: swc::Compiler,
+    options: Arc<swc::config::Options>,
+    resolver: R,
 }
 
+impl<R> Load for JsLoader<R> {
+    fn load(&self, base: &Path, import: &str) -> Result<(Arc<SourceFile>, Module), Error> {
+        let path = base.join(Path::new(import));
+        let fm = self.compiler.cm.load_file(&path)?;
+
+        let config = self.compiler.config_for_file(&self.options, &fm)?;
+        let program =
+            self.compiler
+                .parse_js(fm.clone(), config.target, config.syntax, true, true)?;
+
+        match program {
+            Program::Module(m) => Ok((fm, m)),
+            Program::Script(_) => unreachable!(),
+        }
+    }
+}
+
+pub struct Resolver {}
+
 pub trait Resolve {}
+
+impl Resolve for Resolver {}
