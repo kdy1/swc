@@ -25,6 +25,7 @@ rayon = "1"
 log = "0.4.8"
 node-resolve = "2.2.0"
 petgraph = "0.5"
+fxhash = "0.2.1"
 
 [dev-dependencies]
 testing = { path = "../testing" }

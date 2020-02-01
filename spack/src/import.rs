@@ -1,6 +1,8 @@
 use super::Bundler;
+use crate::ModuleId;
+use fxhash::FxHashMap;
 use std::mem::replace;
-use swc_atoms::js_word;
+use swc_atoms::{js_word, JsWord};
 use swc_common::{util::move_map::MoveMap, Fold, FoldWith};
 use swc_ecma_ast::*;
 use swc_ecma_utils::find_ids;
@@ -28,6 +30,7 @@ pub(super) struct ImportInfo {
     pub requires: Vec<Str>,
     pub partial_requires: Vec<ImportDecl>,
     pub dynamic_imports: Vec<Str>,
+    pub srcs: FxHashMap<JsWord, ModuleId>,
 }
 
 #[derive(Default)]

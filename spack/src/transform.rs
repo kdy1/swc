@@ -57,7 +57,7 @@ impl Bundler {
     ) -> Result<TransformedModule, Error> {
         log::trace!("transform_module({})", fm.name);
 
-        let imports = self.extract_import_info(&mut module);
+        let mut imports = self.extract_import_info(&mut module);
 
         let (module, deps) = rayon::join(
             || -> Result<_, Error> {
@@ -86,7 +86,7 @@ impl Bundler {
                     };
 
                     // Load dependencies
-                    self.load_imports(&p, &imports)
+                    self.load_imports(&p, &mut imports)
                 })
             },
         );
@@ -97,10 +97,11 @@ impl Bundler {
         Ok((id, fm, module, Arc::new(imports)))
     }
 
-    fn load_imports(&self, base: &Path, info: &ImportInfo) -> Result<(), Error> {
+    fn load_imports(&self, base: &Path, info: &mut ImportInfo) -> Result<(), Error> {
         log::trace!("load_imports({})", base.display());
 
         let ImportInfo {
+            srcs,
             imports,
             requires,
             partial_requires,
