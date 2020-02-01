@@ -43,6 +43,8 @@ pub struct Bundler {
     scope: Scope,
 }
 
+type LoadedModule = (ModuleId, Arc<SourceFile>, Module);
+
 impl Bundler {
     pub fn new(
         cm: Arc<SourceMap>,
@@ -69,19 +71,24 @@ impl Bundler {
         entries
             .into_par_iter()
             .map(|entry| -> Result<_, Error> {
-                let (fm, module) = self.load_entry_file(entry)?;
-                let module = self.transform_module(fm.clone(), module)?;
+                let (id, fm, module) = self.load_entry_file(entry)?;
+                let module = self.transform_module(id, fm.clone(), module)?;
 
                 Ok((fm, module))
             })
             .collect()
     }
 
-    fn transform_module(&self, fm: Arc<SourceFile>, mut module: Module) -> Result<Module, Error> {
+    fn transform_module(
+        &self,
+        id: ModuleId,
+        fm: Arc<SourceFile>,
+        mut module: Module,
+    ) -> Result<Module, Error> {
         log::trace!("transform_module({})", fm.name);
 
         let info = self.extract_info(&mut module);
-        self.store_pure_constants(ModuleId::from(&*fm), info.exports.pure_constants);
+        self.store_pure_constants(id, info.exports.pure_constants);
         let imports = info.imports;
 
         let (module, deps) = rayon::join(
@@ -166,30 +173,43 @@ impl Bundler {
         Ok(())
     }
 
-    fn load_dep(&self, base: &FileName, s: &Str) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load_dep(&self, base: &FileName, s: &Str) -> Result<LoadedModule, Error> {
         log::trace!("load_dep({}) -> {}", base, s.value);
 
         let base = match base {
             FileName::Real(ref path) => path,
             _ => unreachable!(),
         };
-        let (fm, module) = self.load(&base, &s.value)?;
-        let module = self.transform_module(fm.clone(), module)?;
+        let (id, fm, module) = self.load(&base, &s.value)?;
+        let module = self.transform_module(id, fm.clone(), module)?;
 
-        Ok((fm, module))
+        Ok((id, fm, module))
     }
 
-    fn load_entry_file(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load_entry_file(&self, path: &Path) -> Result<LoadedModule, Error> {
         self.load(&self.working_dir, &path.as_os_str().to_string_lossy())
     }
 
-    fn load(&self, base: &Path, s: &str) -> Result<(Arc<SourceFile>, Module), Error> {
+    fn load(&self, base: &Path, s: &str) -> Result<LoadedModule, Error> {
         let path = self
             .resolver
             .resolve(base, s)
             .context("failed to resolve")?;
 
-        self.loader.load(&path).context("failed to load")
+        let module_id = if let Some(module_id) = self.module_ids.get(&path) {
+            *module_id.value()
+        } else {
+            let module_id = self.module_id_gen.gen();
+
+            let path = Arc::new(path);
+            self.module_ids.insert(path.clone(), module_id);
+
+            module_id
+        };
+
+        let (fm, module) = self.loader.load(&path).context("failed to load")?;
+
+        Ok((module_id, fm, module))
     }
 
     pub fn swc(&self) -> &swc::Compiler {
