@@ -3,7 +3,7 @@
 #![feature(specialization)]
 
 pub use self::id::{Id, ModuleId, QualifiedId};
-use self::{analysis::ImportInfo, load::Load, scope::Scope};
+use self::{import_export::ImportInfo, load::Load, scope::Scope};
 use crate::{id::ModuleIdGenerator, resolve::Resolve, transform::TransformedModule};
 use anyhow::Error;
 use dashmap::DashMap;
@@ -15,8 +15,8 @@ use std::{
 use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 
-mod analysis;
 mod id;
+mod import_export;
 pub mod load;
 pub mod resolve;
 mod scope;
