@@ -44,13 +44,25 @@ impl<R> JsLoader<R> {
 
 impl<R> Load for JsLoader<R> {
     fn load(&self, base: &Path, import: &str) -> Result<(Arc<SourceFile>, Module), Error> {
-        let path = base.join(Path::new(import));
+        log::debug!("JsLoader.load({}) -> {}", base.display(), import);
+
+        let path = node_resolve::Resolver::new()
+            .with_basedir(base.parent().unwrap().into())
+            .resolve(import)?;
+
         let fm = self.compiler.cm.load_file(&path)?;
 
+        log::trace!("JsLoader.load: loaded");
+
         let config = self.compiler.config_for_file(&self.options, &fm)?;
+
+        log::trace!("JsLoader.load: loaded config");
+
         let program =
             self.compiler
                 .parse_js(fm.clone(), config.target, config.syntax, true, true)?;
+
+        log::trace!("JsLoader.load: parsed");
 
         match program {
             Program::Module(m) => Ok((fm, m)),
