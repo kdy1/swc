@@ -2,7 +2,7 @@ use super::Bundler;
 use crate::Id;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Visit, VisitWith};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Visit, VisitWith, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{find_ids, undefined, ExprExt};
 
@@ -10,6 +10,8 @@ impl Bundler {
     /// This methods removes import statements (statements like `import a as b
     /// from 'foo'`) from module, but require calls and dynamic imports
     /// remain as-is.
+    ///
+    /// This method also drops empty statements from the module.
     pub(super) fn extract_info(&self, module: &mut Module) -> ModuleInfo {
         let body = replace(&mut module.body, vec![]);
 
@@ -45,54 +47,14 @@ struct Finder {
     info: ModuleInfo,
 }
 
-impl Fold<ExportDecl> for Finder {
-    fn fold(&mut self, decl: ExportDecl) -> ExportDecl {
-        match decl.decl {
-            Decl::Var(ref v)
-                if v.kind == VarDeclKind::Const
-                    && v.decls.iter().all(|v| {
-                        (match v.name {
-                            Pat::Ident(..) => true,
-                            _ => false,
-                        }) && (match v.init {
-                            Some(box Expr::Lit(..)) => true,
-                            _ => false,
-                        })
-                    }) =>
-            {
-                self.info
-                    .exports
-                    .pure_constants
-                    .extend(v.decls.iter().map(|decl| {
-                        let id = match &decl.name {
-                            Pat::Ident(i) => i.into(),
-                            _ => unreachable!(),
-                        };
-
-                        let lit = match &decl.init {
-                            Some(box Expr::Lit(l)) => l.clone(),
-                            _ => unreachable!(),
-                        };
-
-                        (id, lit)
-                    }));
-
-                return decl;
-            }
-
-            _ => {}
-        }
-
-        decl.fold_children(self)
-    }
-}
-
 impl Fold<Vec<ModuleItem>> for Finder {
     fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
         items.move_flat_map(|item| {
             //
 
             match item {
+                ModuleItem::Stmt(Stmt::Empty(..)) => None,
+
                 ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
                     self.info.imports.imports.push(i);
                     None
@@ -101,6 +63,50 @@ impl Fold<Vec<ModuleItem>> for Finder {
                 _ => Some(item.fold_with(self)),
             }
         })
+    }
+}
+
+impl Fold<ModuleItem> for Finder {
+    fn fold(&mut self, item: ModuleItem) -> ModuleItem {
+        match item {
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+                decl: Decl::Var(v),
+                ..
+            })) if v.kind == VarDeclKind::Const
+                && v.decls.iter().all(|v| {
+                    (match v.name {
+                        Pat::Ident(..) => true,
+                        _ => false,
+                    }) && (match v.init {
+                        Some(box Expr::Lit(..)) => true,
+                        _ => false,
+                    })
+                }) =>
+            {
+                self.info
+                    .exports
+                    .pure_constants
+                    .extend(v.decls.into_iter().map(|decl| {
+                        let id = match decl.name {
+                            Pat::Ident(i) => i.into(),
+                            _ => unreachable!(),
+                        };
+
+                        let lit = match decl.init {
+                            Some(box Expr::Lit(l)) => l,
+                            _ => unreachable!(),
+                        };
+
+                        (id, lit)
+                    }));
+
+                return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }));
+            }
+
+            _ => {}
+        }
+
+        item.fold_children(self)
     }
 }
 
