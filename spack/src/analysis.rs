@@ -89,13 +89,17 @@ impl Fold<ExportDecl> for Finder {
 
 impl Fold<Vec<ModuleItem>> for Finder {
     fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
-        items.move_flat_map(|item| match item {
-            ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
-                self.info.imports.imports.push(i);
-                None
-            }
+        items.move_flat_map(|item| {
+            //
 
-            _ => Some(item.fold_with(self)),
+            match item {
+                ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
+                    self.info.imports.imports.push(i);
+                    None
+                }
+
+                _ => Some(item.fold_with(self)),
+            }
         })
     }
 }
@@ -103,7 +107,7 @@ impl Fold<Vec<ModuleItem>> for Finder {
 impl Fold<CallExpr> for Finder {
     fn fold(&mut self, node: CallExpr) -> CallExpr {
         if node.args.len() != 1 {
-            return node;
+            return node.fold_children(self);
         }
         let src = match node.args.first().unwrap() {
             ExprOrSpread {
