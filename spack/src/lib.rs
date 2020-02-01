@@ -2,7 +2,7 @@
 #![feature(box_patterns)]
 #![feature(specialization)]
 
-use crate::{import::ImportInfo, loader::Load};
+use crate::{analysis::ImportInfo, loader::Load};
 use anyhow::Error;
 use rayon::prelude::*;
 use std::{
@@ -12,7 +12,7 @@ use std::{
 use swc_common::{errors::Handler, FileName, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program, Str};
 
-mod import;
+mod analysis;
 pub mod loader;
 pub mod plugin;
 
