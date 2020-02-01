@@ -4,7 +4,7 @@
 
 pub use self::id::{Id, ModuleId, QualifiedId};
 use self::{analysis::ImportInfo, load::Load, scope::Scope};
-use crate::{id::ModuleIdGenerator, resolve::Resolve};
+use crate::{id::ModuleIdGenerator, resolve::Resolve, transform::TransformedModule};
 use anyhow::Error;
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -43,9 +43,6 @@ pub struct Bundler {
 
     scope: Scope,
 }
-
-/// Module after applying transformations.
-type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>);
 
 impl Bundler {
     pub fn new(

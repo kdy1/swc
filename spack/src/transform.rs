@@ -1,9 +1,12 @@
 use super::Bundler;
-use crate::{ModuleId, TransformedModule};
+use crate::ModuleId;
 use anyhow::{Context, Error};
 use std::{path::Path, sync::Arc};
 use swc_common::{FileName, SourceFile};
 use swc_ecma_ast::{Module, Program};
+
+/// Module after applying transformations.
+pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>);
 
 impl Bundler {
     /// Phase 1 (discovery) and Phase 2 (linking)
