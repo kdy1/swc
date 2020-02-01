@@ -20,3 +20,7 @@ swc = { path = "../" }
 anyhow = "1"
 derive_builder = "0.9"
 rayon = "1"
+
+[dev-dependencies]
+testing = { path = "../testing" }
+walkdir = "2.3.1"
