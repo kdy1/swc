@@ -52,7 +52,6 @@ where
 
             self.pass_cnt += 1;
             len = self.changed.as_ref().map(|v| v.len()).unwrap_or(0);
-            log::debug!("changed = {:?}", self.changed);
             if self.changed.is_none() {
                 self.changed = Some(vec![]);
             }
@@ -62,7 +61,7 @@ where
             }
         }
 
-        log::debug!("Ran UsageTracker for {} times", self.pass_cnt);
+        log::debug!("UsageTracker: Ran {} times", self.pass_cnt);
 
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
