@@ -18,7 +18,7 @@ use swc_ecma_ast::*;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
-use testing::StdErr;
+use testing::{NormalizedOutput, StdErr};
 use walkdir::WalkDir;
 
 fn add_test<F: FnOnce() + Send + 'static>(
@@ -103,15 +103,22 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     ),
                 );
 
-                let modules = bundler.bundle(&entries);
+                let bundled = bundler.bundle(&entries);
 
-                for (entry, module) in entries.into_iter().zip(modules) {
+                for (entry, module) in entries.into_iter().zip(bundled) {
                     let (fm, module) = module.expect("failed to bundle module");
 
                     let code = bundler
                         .jsc()
-                        .print(&Program::Module(module), fm.clone(), false, false)?
+                        .print(&Program::Module(module), fm.clone(), false, false)
+                        .expect("failed to emit bundle")
                         .code;
+
+                    let s = NormalizedOutput::from(code);
+
+                    let path = dir_name.join("output").join();
+
+                    s.compare_to_file(&path).expect("failed to print");
                 }
 
                 Ok(())
