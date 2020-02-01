@@ -76,16 +76,14 @@ impl Bundler {
                 let (_, fm, module) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
 
-                let module = self.mark(module)?;
+                let module = self.mark((*module).clone())?;
 
                 Ok((fm, module))
             })
             .collect()
     }
 
-    fn mark(&self, module: Arc<Module>) -> Result<Module, Error> {
-        let mut module = (*module).clone();
-
+    fn mark(&self, module: Module) -> Result<Module, Error> {
         let module = self.drop_unused(module, None);
 
         Ok(module)
