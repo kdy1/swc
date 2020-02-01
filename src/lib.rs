@@ -201,6 +201,8 @@ impl Compiler {
     }
 
     /// This method handles merging of config.
+    ///
+    /// This method does **not** parse module.
     pub fn config_for_file(
         &self,
         opts: &Options,
@@ -283,6 +285,22 @@ impl Compiler {
         Ok(built)
     }
 
+    pub fn transform(
+        &self,
+        program: Program,
+        external_helpers: bool,
+        mut pass: impl Pass,
+    ) -> Program {
+        self.run(|| {
+            helpers::HELPERS.set(&Helpers::new(external_helpers), || {
+                util::HANDLER.set(&self.handler, || {
+                    // Fold module
+                    program.fold_with(&mut pass)
+                })
+            })
+        })
+    }
+
     pub fn process_js_file(
         &self,
         fm: Arc<SourceFile>,
@@ -313,13 +331,7 @@ impl Compiler {
                 config.is_module,
                 !config.minify,
             )?;
-            let mut pass = config.pass;
-            let module = helpers::HELPERS.set(&Helpers::new(config.external_helpers), || {
-                util::HANDLER.set(&self.handler, || {
-                    // Fold module
-                    module.fold_with(&mut pass)
-                })
-            });
+            let module = self.transform(module, config.external_helpers, config.pass);
 
             self.print(
                 &module,
