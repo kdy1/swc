@@ -5,20 +5,20 @@
 
 extern crate test;
 
-use spack::{loader::Resolver, Bundler, Config};
+use spack::{loader::Resolver, Bundler};
 use std::{
     env,
-    fs::{read_dir, File},
-    io::{self, Read},
+    fs::read_dir,
+    io::{self},
     path::Path,
     sync::Arc,
 };
-use swc_common::{Fold, FoldWith};
+use swc_common::FileName;
 use swc_ecma_ast::*;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
-use testing::{NormalizedOutput, StdErr};
+use testing::NormalizedOutput;
 use walkdir::WalkDir;
 
 fn add_test<F: FnOnce() + Send + 'static>(
@@ -78,7 +78,6 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
         let ignore = false;
 
-        let dir = dir.clone();
         let name = format!(
             "fixture::{}::{}",
             if errors { "error" } else { "pass" },
@@ -116,7 +115,11 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
                     let s = NormalizedOutput::from(code);
 
-                    let path = dir_name.join("output").join();
+                    let name = match fm.name {
+                        FileName::Real(ref p) => p.clone(),
+                        _ => unreachable!(),
+                    };
+                    let path = entry.join("output").join(name.file_name().unwrap());
 
                     s.compare_to_file(&path).expect("failed to print");
                 }
