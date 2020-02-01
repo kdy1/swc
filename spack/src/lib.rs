@@ -68,6 +68,8 @@ impl Bundler {
     }
 
     fn transform_module(&self, fm: Arc<SourceFile>, mut module: Module) -> Result<Module, Error> {
+        log::trace!("transform_module({})", fm.name);
+
         let info = self.extract_info(&mut module);
         self.store_pure_constants(ModuleId::from(&*fm), info.exports.pure_constants);
         let imports = info.imports;
@@ -104,6 +106,8 @@ impl Bundler {
     }
 
     fn load_imports(&self, base: &FileName, info: ImportInfo) -> Result<(), Error> {
+        log::trace!("load_imports({})", base);
+
         let ImportInfo {
             imports,
             requires,
@@ -153,11 +157,12 @@ impl Bundler {
     }
 
     fn load_dep(&self, base: &FileName, s: &Str) -> Result<(Arc<SourceFile>, Module), Error> {
+        log::trace!("load_dep({}) -> {}", base, s.value);
+
         let base = match base {
             FileName::Real(ref path) => path,
             _ => unreachable!(),
         };
-
         let (fm, module) = self.module_loader.load(&base, &s.value)?;
         let module = self.transform_module(fm.clone(), module)?;
 
