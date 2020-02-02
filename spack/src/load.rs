@@ -1,7 +1,7 @@
 use anyhow::Error;
 use std::{path::Path, sync::Arc};
-use swc_common::{errors::Handler, SourceFile, SourceMap};
-use swc_ecma_ast::{Module, Program};
+use swc_common::SourceFile;
+use swc_ecma_ast::Module;
 
 pub trait Load {
     fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error>;

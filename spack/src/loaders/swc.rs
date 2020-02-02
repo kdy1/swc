@@ -3,19 +3,31 @@ use anyhow::Error;
 use std::{path::Path, sync::Arc};
 use swc_common::{errors::Handler, SourceFile, SourceMap};
 use swc_ecma_ast::{Module, Program};
+use swc_ecma_parser::JscTarget;
 
 /// JavaScript loader
 pub struct JsLoader {
     compiler: swc::Compiler,
-    options: Arc<swc::config::Options>,
+    options: swc::config::Options,
 }
 
 impl JsLoader {
     pub fn new(
         cm: Arc<SourceMap>,
         handler: Arc<Handler>,
-        options: Arc<swc::config::Options>,
+        mut options: swc::config::Options,
     ) -> Self {
+        if options.config.is_none() {
+            options.config = Some(Default::default());
+        }
+
+        {
+            let v = options.config.as_mut().unwrap();
+            // TODO: Some(Esm)
+            v.module = None;
+            v.minify = Some(false);
+        }
+
         JsLoader {
             compiler: swc::Compiler::new(cm, handler),
             options,
@@ -36,17 +48,18 @@ impl Load for JsLoader {
 
             log::trace!("JsLoader.load: loaded config");
 
+            // We run transform at this phase to strip out unused dependencies.
+            //
+            // Note that we don't apply compat transform at loading phase.
             let program =
                 self.compiler
-                    .parse_js(fm.clone(), config.target, config.syntax, true, true)?;
+                    .parse_js(fm.clone(), JscTarget::Es2019, config.syntax, true, true)?;
 
             log::trace!("JsLoader.load: parsed");
 
-            // Process module
+            let program = self.compiler.transform(program, true, config.pass);
 
-            let program = self
-                .compiler
-                .transform(program, config.external_helpers, config.pass);
+            log::trace!("JsLoader.load: applied transforms");
 
             match program {
                 Program::Module(module) => Ok((fm, module)),
