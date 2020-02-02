@@ -19,7 +19,7 @@ pub struct Bundler {
 
     /// Javascript compiler.
     swc: swc::Compiler,
-    swc_options: Arc<swc::config::Options>,
+    swc_options: swc::config::Options,
 
     module_id_gen: ModuleIdGenerator,
 
@@ -37,7 +37,7 @@ impl Bundler {
         cm: Arc<SourceMap>,
         handler: Arc<Handler>,
         working_dir: PathBuf,
-        swc: Arc<swc::config::Options>,
+        swc: swc::config::Options,
         resolver: Box<dyn Resolve + Sync>,
         loader: Box<dyn Load + Sync>,
     ) -> Self {

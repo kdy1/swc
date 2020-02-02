@@ -1,5 +1,8 @@
 use super::Bundler;
-use crate::bundler::{import_analysis::ImportInfo, scope::Scope};
+use crate::{
+    bundler::{load_transformed::MergedImports, scope::Scope},
+    Id,
+};
 use anyhow::Error;
 use std::sync::Arc;
 use swc_common::{Fold, FoldWith};
@@ -9,7 +12,7 @@ impl Bundler {
     pub(super) fn handle_imports(
         &self,
         module: Module,
-        imports: Arc<ImportInfo>,
+        imports: Arc<MergedImports>,
     ) -> Result<Module, Error> {
         let mut v = Folder {
             scope: &self.scope,
@@ -22,7 +25,7 @@ impl Bundler {
 
 struct Folder<'a> {
     scope: &'a Scope,
-    imports: Arc<ImportInfo>,
+    imports: Arc<MergedImports>,
 }
 
 impl Fold<Expr> for Folder<'_> {
@@ -31,15 +34,7 @@ impl Fold<Expr> for Folder<'_> {
 
         match e {
             Expr::Ident(ref i) => {
-                // Replace ident with constant, if possible
-                for import in self
-                    .imports
-                    .imports
-                    .iter()
-                    .chain(&self.imports.partial_requires)
-                {
-                    for sp in &import.specifiers {}
-                }
+                let id = Id::from(i);
             }
 
             _ => {}

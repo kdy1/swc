@@ -1,13 +1,27 @@
 use super::Bundler;
-use crate::{bundler::import_analysis::ImportInfo, ModuleId};
+use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
 use anyhow::{Context, Error};
+use fxhash::FxHashMap;
 use rayon::prelude::*;
 use std::{path::Path, sync::Arc};
 use swc_common::{FileName, SourceFile};
 use swc_ecma_ast::{Module, Program, Str};
 
 /// Module after applying transformations.
-pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<ImportInfo>);
+pub(super) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<MergedImports>);
+
+#[derive(Debug, Default)]
+pub(super) struct MergedImports {
+    pub ids: FxHashMap<Id, Source>,
+    pub side_effect_imports: Vec<Source>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Source {
+    pub module_id: ModuleId,
+    // Clone is relatively cheap, thanks to string_cache.
+    pub src: Str,
+}
 
 impl Bundler {
     /// Phase 1 (discovery)
@@ -59,7 +73,7 @@ impl Bundler {
 
         let mut imports = self.extract_import_info(&mut module);
 
-        let (module, deps) = rayon::join(
+        let (module, imports) = rayon::join(
             || -> Result<_, Error> {
                 self.swc.run(|| {
                     // Process module
@@ -86,22 +100,22 @@ impl Bundler {
                     };
 
                     // Load dependencies
-                    self.load_imports(&p, &mut imports)
+                    self.load_imports(&p, imports)
                 })
             },
         );
 
-        deps?;
+        let imports = imports?;
         let module = Arc::new(module?);
 
         Ok((id, fm, module, Arc::new(imports)))
     }
 
-    fn load_imports(&self, base: &Path, info: &mut ImportInfo) -> Result<(), Error> {
+    fn load_imports(&self, base: &Path, info: ImportInfo) -> Result<MergedImports, Error> {
         log::trace!("load_imports({})", base.display());
 
+        let mut merged = MergedImports::default();
         let ImportInfo {
-            srcs,
             imports,
             requires,
             partial_requires,
@@ -112,8 +126,8 @@ impl Bundler {
             .into_par_iter()
             .map(|import| import.src)
             .chain(partial_requires.into_par_iter().map(|require| require.src))
-            .chain(*requires)
-            .chain(*dynamic_imports)
+            .chain(requires)
+            .chain(dynamic_imports)
             .map(|src| -> Result<_, Error> {
                 //
                 let res = self.load_transformed(base, &src.value)?;
@@ -126,9 +140,12 @@ impl Bundler {
             // TODO: Report error and proceed instead of returning an error
             let (res, src): (TransformedModule, Str) = res?;
 
-            srcs.insert(src.value, res.0);
+            merged.ids.extend(res.3.ids.clone());
+            merged
+                .side_effect_imports
+                .extend(res.3.side_effect_imports.clone());
         }
 
-        Ok(())
+        Ok(merged)
     }
 }

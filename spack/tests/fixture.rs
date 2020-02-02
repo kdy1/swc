@@ -5,7 +5,7 @@
 
 extern crate test;
 
-use spack::Bundler;
+use spack::{loaders::swc::JsLoader, Bundler};
 use std::{
     env,
     fs::{create_dir_all, read_dir},
@@ -104,16 +104,15 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
 
             eprintln!("\n\n========== Running reference test {}\n", dir_name);
 
-            let options = Arc::new(swc::config::Options::default());
             testing::run_test2(true, |cm, handler| {
                 let handler = Arc::new(handler);
                 let bundler = Bundler::new(
                     cm.clone(),
                     handler.clone(),
                     env::current_dir().unwrap(),
-                    options.clone(),
+                    Default::default(),
                     box spack::resolve::NodeResolver,
-                    box spack::loader::JsLoader::new(cm.clone(), handler.clone(), options.clone()),
+                    box JsLoader::new(cm.clone(), handler.clone(), Default::default()),
                 );
 
                 assert_ne!(entries.len(), 0);
