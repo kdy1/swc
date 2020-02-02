@@ -17,7 +17,7 @@ impl Bundler {
             marking_phase: false,
         };
 
-        node.fold_with(&mut v)
+        self.swc.run(|| node.fold_with(&mut v))
     }
 }
 
