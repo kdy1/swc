@@ -189,6 +189,10 @@ impl Bundler {
                     src: decl.src,
                 };
 
+                if is_dynamic {
+                    self.scope.mark_as_dynamic(src.module_id);
+                }
+
                 if decl.specifiers.is_empty() {
                     merged.side_effect_imports.push(src);
                 } else {
