@@ -53,4 +53,10 @@ impl<'a> From<&'a Ident> for Id {
     }
 }
 
+impl PartialEq<Ident> for Id {
+    fn eq(&self, other: &Ident) -> bool {
+        self.0 == other.sym && self.1 == other.span.ctxt()
+    }
+}
+
 pub type QualifiedId = (ModuleId, Id);
