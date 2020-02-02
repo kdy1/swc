@@ -15,6 +15,7 @@ impl Bundler {
             pass_cnt: 0,
             mark: self.used_mark,
             included: Default::default(),
+            used_exports,
             marking_phase: false,
         };
 
@@ -31,6 +32,8 @@ pub(super) struct UsageTracker {
 
     /// Identifiers which should be emitted.
     included: Vec<Id>,
+
+    used_exports: Option<Vec<Id>>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -60,7 +63,7 @@ where
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
                 if cfg!(debug_assertions) {
-                    println!("{}\nDropping {:?}", self.path, item);
+                    println!("{}\n{:?}\nDropping {:?}", self.path, self.included, item);
                 }
 
                 return None;
@@ -133,7 +136,7 @@ impl Fold<ExportDecl> for UsageTracker {
         if self.is_marked(node.span) {
             return node;
         }
-        // TODO: Export only when it's required. (i.e. check self.changes)
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
 
         node.span = node.span.apply_mark(self.mark);
 
@@ -146,9 +149,45 @@ impl Fold<ExportDecl> for UsageTracker {
     }
 }
 
-//impl Fold<ExportDefaultExpr> for UsageTracker {}
-//
-//impl Fold<ExportSpecifier> for UsageTracker {}
+impl Fold<ExportDefaultExpr> for UsageTracker {
+    fn fold(&mut self, node: ExportDefaultExpr) -> ExportDefaultExpr {
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        unimplemented!()
+    }
+}
+
+impl Fold<NamedExport> for UsageTracker {
+    fn fold(&mut self, node: NamedExport) -> NamedExport {
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        unimplemented!()
+    }
+}
+
+impl Fold<ExportDefaultDecl> for UsageTracker {
+    fn fold(&mut self, node: ExportDefaultDecl) -> ExportDefaultDecl {
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        unimplemented!()
+    }
+}
+
+impl Fold<ExportAll> for UsageTracker {
+    fn fold(&mut self, node: ExportAll) -> ExportAll {
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        unimplemented!()
+    }
+}
 
 impl Fold<ExprStmt> for UsageTracker {
     fn fold(&mut self, node: ExprStmt) -> ExprStmt {
