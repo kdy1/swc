@@ -113,7 +113,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                     env::current_dir().unwrap(),
                     options.clone(),
                     box spack::resolve::NodeResolver,
-                    box spack::load::JsLoader::new(cm.clone(), handler.clone(), options.clone()),
+                    box spack::loader::JsLoader::new(cm.clone(), handler.clone(), options.clone()),
                 );
 
                 assert_ne!(entries.len(), 0);
