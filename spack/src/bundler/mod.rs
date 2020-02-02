@@ -1,6 +1,7 @@
 use self::scope::Scope;
 use crate::{
-    bundler::import::ImportInfo, id::ModuleIdGenerator, load::Load, resolve::Resolve, Config,
+    bundler::import_analysis::ImportInfo, id::ModuleIdGenerator, load::Load, resolve::Resolve,
+    Config,
 };
 use anyhow::Error;
 use rayon::prelude::*;
@@ -9,7 +10,7 @@ use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 
 mod export;
-mod import;
+mod import_analysis;
 mod scope;
 mod transform;
 mod usage_analysis;
