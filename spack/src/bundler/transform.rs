@@ -127,6 +127,11 @@ impl Bundler {
             )
             .collect::<Vec<_>>();
 
+        let mut buf = Vec::with_capacity(loaded.len());
+        for res in loaded {
+            buf.push(res?);
+        }
+
         Ok(())
     }
 }
