@@ -35,7 +35,7 @@ pub(super) struct UsageTracker {
 
 impl<T> Fold<Vec<T>> for UsageTracker
 where
-    T: StmtLike + FoldWith<Self> + Spanned,
+    T: StmtLike + FoldWith<Self> + Spanned + std::fmt::Debug,
 {
     fn fold(&mut self, items: Vec<T>) -> Vec<T> {
         let parent_cnt = self.pass_cnt;
@@ -65,6 +65,10 @@ where
 
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
+                if cfg!(debug_assertion) {
+                    println!("Dropping {:?}", item);
+                }
+
                 return None;
             }
             Some(item)
@@ -92,6 +96,18 @@ impl UsageTracker {
                 return true;
             }
         }
+    }
+}
+
+impl Fold<ImportDecl> for UsageTracker {
+    fn fold(&mut self, import: ImportDecl) -> ImportDecl {
+        let mut import: ImportDecl = import.fold_children(self);
+
+        if import.specifiers.is_empty() {
+            import.span = import.span.apply_mark(self.mark);
+        }
+
+        import
     }
 }
 
