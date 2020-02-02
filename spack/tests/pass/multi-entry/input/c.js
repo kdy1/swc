@@ -1,6 +1,6 @@
 import { foo } from './d';
 
-console.log('loading d.js');
+console.log('loading c.js');
 
 export function c() {
     foo();
