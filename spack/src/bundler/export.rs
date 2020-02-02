@@ -28,7 +28,7 @@ impl Bundler {
 
         *module = m;
 
-        Ok((v.info))
+        Ok(v.info)
     }
 }
 

@@ -1,7 +1,6 @@
 use dashmap::DashMap;
 use std::{
     fmt,
-    fmt::Write,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},

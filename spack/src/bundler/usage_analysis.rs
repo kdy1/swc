@@ -1,5 +1,4 @@
 use crate::Bundler;
-use std::{fs::File, mem::replace};
 use swc_common::{util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
 use swc_ecma_transforms::{resolver, resolver::Resolver};

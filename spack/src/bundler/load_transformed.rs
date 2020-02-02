@@ -4,7 +4,6 @@ use anyhow::{Context, Error};
 use fxhash::FxHashMap;
 use rayon::prelude::*;
 use std::{
-    fs::canonicalize,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -67,7 +66,7 @@ impl Bundler {
     }
 
     fn load(&self, path: &Arc<PathBuf>) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
-        let module_id = self.module_id_gen.gen(path);
+        let module_id = self.scope.module_id_gen.gen(path);
 
         let path = Arc::new(path);
 

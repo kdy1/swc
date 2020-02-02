@@ -1,13 +1,12 @@
 use self::scope::Scope;
 use crate::{
-    bundler::load_transformed::TransformedModule, id::ModuleIdGenerator, load::Load,
-    resolve::Resolve, Config, ModuleId,
+    bundler::load_transformed::TransformedModule, load::Load, resolve::Resolve, Config, ModuleId,
 };
 use anyhow::{Context, Error};
-use petgraph::{dot::Dot, graphmap::DiGraphMap, stable_graph::NodeIndex, Graph};
+use petgraph::{dot::Dot, graphmap::DiGraphMap};
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
-use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
+use swc_common::{Mark, SourceFile};
 use swc_ecma_ast::Module;
 
 mod export;
@@ -24,8 +23,6 @@ pub struct Bundler {
     /// Javascript compiler.
     swc: Arc<swc::Compiler>,
     swc_options: swc::config::Options,
-
-    module_id_gen: ModuleIdGenerator,
 
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
@@ -55,7 +52,6 @@ impl Bundler {
             loader,
             resolver,
             scope: Default::default(),
-            module_id_gen: Default::default(),
             used_mark,
         }
     }
