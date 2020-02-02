@@ -94,6 +94,18 @@ impl UsageTracker {
             }
         }
     }
+
+    pub fn fold_in_marking_phase<T>(&mut self, node: T) -> T
+    where
+        T: FoldWith<Self>,
+    {
+        let old = self.marking_phase;
+        self.marking_phase = true;
+        let node = node.fold_with(self);
+        self.marking_phase = old;
+
+        node
+    }
 }
 
 impl Fold<ImportDecl> for UsageTracker {
@@ -136,46 +148,58 @@ impl Fold<ExportDecl> for UsageTracker {
         if self.is_marked(node.span) {
             return node;
         }
+
         // TODO: Export only when it's required. (i.e. check self.used_exports)
 
         node.span = node.span.apply_mark(self.mark);
-
-        let old = self.marking_phase;
-        self.marking_phase = true;
-        node.decl = node.decl.fold_with(self);
-        self.marking_phase = old;
+        node.decl = self.fold_in_marking_phase(node.decl);
 
         node
     }
 }
 
 impl Fold<ExportDefaultExpr> for UsageTracker {
-    fn fold(&mut self, node: ExportDefaultExpr) -> ExportDefaultExpr {
+    fn fold(&mut self, mut node: ExportDefaultExpr) -> ExportDefaultExpr {
         if self.is_marked(node.span) {
             return node;
         }
 
-        unimplemented!()
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.expr = self.fold_in_marking_phase(node.expr);
+
+        node
     }
 }
 
 impl Fold<NamedExport> for UsageTracker {
-    fn fold(&mut self, node: NamedExport) -> NamedExport {
+    fn fold(&mut self, mut node: NamedExport) -> NamedExport {
         if self.is_marked(node.span) {
             return node;
         }
 
-        unimplemented!()
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.specifiers = self.fold_in_marking_phase(node.specifiers);
+
+        node
     }
 }
 
 impl Fold<ExportDefaultDecl> for UsageTracker {
-    fn fold(&mut self, node: ExportDefaultDecl) -> ExportDefaultDecl {
+    fn fold(&mut self, mut node: ExportDefaultDecl) -> ExportDefaultDecl {
         if self.is_marked(node.span) {
             return node;
         }
 
-        unimplemented!()
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.decl = self.fold_in_marking_phase(node.decl);
+
+        node
     }
 }
 
@@ -185,7 +209,9 @@ impl Fold<ExportAll> for UsageTracker {
             return node;
         }
 
-        unimplemented!()
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        unimplemented!("drop_unused: `export * from 'foo'`")
     }
 }
 
