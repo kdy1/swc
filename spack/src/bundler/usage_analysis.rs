@@ -20,7 +20,7 @@ impl Bundler {
             path,
             pass_cnt: 0,
             mark: self.used_mark,
-            changed: Default::default(),
+            included: Default::default(),
             marking_phase: false,
         };
 
@@ -35,7 +35,8 @@ pub(super) struct UsageTracker {
     /// Applied to used nodes.
     mark: Mark,
 
-    changed: Vec<Ident>,
+    /// Identifiers which should be emitted.
+    included: Vec<Ident>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -53,9 +54,9 @@ where
         let mut len;
         loop {
             self.pass_cnt += 1;
-            len = self.changed.len();
+            len = self.included.len();
             items = items.fold_children(self);
-            if len == self.changed.len() {
+            if len == self.included.len() {
                 break;
             }
         }
@@ -110,14 +111,14 @@ impl Fold<ImportDecl> for UsageTracker {
         //      e.g) import { foo, bar } from './foo';
         //           foo()
 
-        if self.changed.is_empty() {
+        if self.included.is_empty() {
             return import;
         }
 
         let ids: Vec<Id> = find_ids(&import.specifiers);
 
         for id in ids {
-            for c in &self.changed {
+            for c in &self.included {
                 if c.sym == id.0 && c.span.ctxt() == id.1 {
                     import.span = import.span.apply_mark(self.mark);
                     return import;
@@ -191,7 +192,7 @@ impl Fold<Ident> for UsageTracker {
                 i.sym,
                 i.span.ctxt()
             );
-            self.changed.push(i.clone());
+            self.included.push(i.clone());
         }
 
         i
@@ -206,14 +207,14 @@ impl Fold<VarDecl> for UsageTracker {
 
         let var: VarDecl = var.fold_children(self);
 
-        if self.changed.is_empty() {
+        if self.included.is_empty() {
             return var;
         }
 
         let ids: Vec<Ident> = find_ids(&var.decls);
 
         for i in ids {
-            for i1 in &self.changed {
+            for i1 in &self.included {
                 if i1.sym == i.sym {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
