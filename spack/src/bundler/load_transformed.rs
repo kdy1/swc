@@ -51,7 +51,7 @@ impl Bundler {
             .context("failed to resolve")?;
 
         let path = Arc::new(path);
-        if let Some(cached) = self.scope.cache.get(&path) {
+        if let Some(cached) = self.scope.get_module_by_path(&path) {
             return Ok((path, cached.clone()));
         }
 
@@ -61,7 +61,7 @@ impl Bundler {
             .transform_module(id, fm.clone(), module)
             .context("failed to transform module")?;
 
-        self.scope.cache.insert(path.clone(), v.clone());
+        self.scope.store_module(path.clone(), v.clone());
 
         Ok((path, v))
     }
@@ -161,8 +161,7 @@ impl Bundler {
             // TODO: Report error and proceed instead of returning an error
             let ((path, res), decl): ((Arc<PathBuf>, TransformedModule), ImportDecl) = res?;
 
-            if let Some(v) = self.scope.cache.get(&path) {
-                let src = v.value();
+            if let Some(src) = self.scope.get_module_by_path(&path) {
                 let src = Source {
                     module_id: src.0,
                     src: decl.src,
