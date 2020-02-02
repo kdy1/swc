@@ -8,6 +8,7 @@ pub use self::{
 };
 
 mod bundler;
+mod chunk;
 mod id;
 pub mod load;
 pub mod loaders;

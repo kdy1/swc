@@ -1,13 +1,11 @@
 use super::Bundler;
+use crate::{chunk::Chunk, ModuleId};
 use anyhow::Error;
-use fxhash::FxHashMap;
-use std::sync::Arc;
-use swc_atoms::JsWord;
-use swc_ecma_ast::Module;
+use swc_ecma_ast::*;
 
 #[derive(Debug)]
-pub enum MergedModule {
-    Modules(Module, FxHashMap<JsWord, Module>),
+pub(crate) enum MergedModule {
+    Modules(Module, Vec<Chunk>),
     Module(Module),
 }
 
@@ -15,7 +13,7 @@ impl Bundler {
     pub(super) fn merge_modules(
         &self,
         entry: Module,
-        modules: &[Arc<Module>],
+        modules: &[ModuleId],
     ) -> Result<MergedModule, Error> {
         let mut v = Merger { to: entry };
 
@@ -26,4 +24,17 @@ impl Bundler {
 #[derive(Debug)]
 struct Merger {
     to: Module,
+}
+
+/// Returns true if loading a module has any side effect.
+fn has_side_effect(module: &Module) -> bool {
+    for item in module.body {
+        match item {
+            ModuleItem::ModuleDecl(_) => {}
+            ModuleItem::Stmt(_) => {}
+        }
+    }
+
+    // De-optimization is better than breaking a code.
+    true
 }
