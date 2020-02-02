@@ -1,5 +1,5 @@
 use super::Bundler;
-use crate::{import::ImportInfo, ModuleId};
+use crate::{bundler::import::ImportInfo, ModuleId};
 use anyhow::{Context, Error};
 use rayon::prelude::*;
 use std::{path::Path, sync::Arc};

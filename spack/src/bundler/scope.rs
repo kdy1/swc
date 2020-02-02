@@ -1,5 +1,5 @@
 use super::Bundler;
-use crate::{transform::TransformedModule, Id, ModuleId, QualifiedId};
+use crate::{bundler::transform::TransformedModule, Id, ModuleId, QualifiedId};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use std::{path::PathBuf, sync::Arc};
