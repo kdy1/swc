@@ -1,10 +1,20 @@
-use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+use std::{
+    fmt,
+    fmt::Write,
+    sync::atomic::{AtomicU64, Ordering::SeqCst},
+};
 use swc_atoms::JsWord;
 use swc_common::SyntaxContext;
 use swc_ecma_ast::Ident;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(u64);
+
+impl fmt::Display for ModuleId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct ModuleIdGenerator(AtomicU64);
