@@ -58,20 +58,20 @@ impl Bundler {
         }
     }
 
-    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
-        fn add(graph: &mut Graph<String, usize>, info: &TransformedModule) {
-            graph.add_node(info.1.name.to_string());
+    fn add(&self, graph: &mut Graph<String, usize>, info: &TransformedModule) {
+        graph.add_node(info.1.name.to_string());
 
-            let v = &info.3;
-            for src in &v.side_effect_imports {
-                graph.add_node(src.src.value.to_string());
-            }
-
-            for (_, src) in &v.ids {
-                graph.add_node(src.src.value.to_string());
-            }
+        let v = &info.3;
+        for src in &v.side_effect_imports {
+            graph.add_node(src.src.value.to_string());
         }
 
+        for (_, src) in &v.ids {
+            graph.add_node(src.src.value.to_string());
+        }
+    }
+
+    pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
         let results = entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
@@ -84,7 +84,7 @@ impl Bundler {
         for res in results {
             let info: TransformedModule = res.context("failed to load module").unwrap();
 
-            add(&mut graph, &info);
+            self.add(&mut graph, &info);
         }
 
         println!("{}", Dot::with_config(&graph, &[]));
