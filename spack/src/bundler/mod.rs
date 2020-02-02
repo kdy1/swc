@@ -13,6 +13,7 @@ mod export;
 mod import_analysis;
 mod import_handler;
 mod load_transformed;
+mod merge;
 mod scope;
 mod usage_analysis;
 
