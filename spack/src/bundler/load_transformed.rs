@@ -66,8 +66,8 @@ impl Bundler {
         Ok((path, v))
     }
 
-    fn load(&self, path: &Path) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
-        let module_id = self.module_id_gen.gen();
+    fn load(&self, path: &Arc<PathBuf>) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
+        let module_id = self.module_id_gen.gen(path);
 
         let path = Arc::new(path);
 

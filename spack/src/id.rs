@@ -1,7 +1,12 @@
+use dashmap::DashMap;
 use std::{
     fmt,
     fmt::Write,
-    sync::atomic::{AtomicU64, Ordering::SeqCst},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering::SeqCst},
+        Arc,
+    },
 };
 use swc_atoms::JsWord;
 use swc_common::SyntaxContext;
@@ -17,11 +22,20 @@ impl fmt::Display for ModuleId {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct ModuleIdGenerator(AtomicU64);
+pub(crate) struct ModuleIdGenerator {
+    v: AtomicU64,
+    cache: DashMap<Arc<PathBuf>, ModuleId>,
+}
 
 impl ModuleIdGenerator {
-    pub fn gen(&self) -> ModuleId {
-        ModuleId(self.0.fetch_add(1, SeqCst))
+    pub fn gen(&self, path: &Arc<PathBuf>) -> ModuleId {
+        if let Some(v) = self.cache.get(path) {
+            return *v.value();
+        }
+
+        let id = ModuleId(self.v.fetch_add(1, SeqCst));
+        self.cache.insert(path.clone(), id);
+        id
     }
 }
 

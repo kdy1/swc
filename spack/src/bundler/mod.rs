@@ -4,7 +4,7 @@ use crate::{
     resolve::Resolve, Config, ModuleId,
 };
 use anyhow::{Context, Error};
-use petgraph::{dot::Dot, Graph};
+use petgraph::{dot::Dot, graphmap::DiGraphMap, stable_graph::NodeIndex, Graph};
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
 use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
@@ -36,6 +36,8 @@ pub struct Bundler {
     scope: Scope,
 }
 
+type ModuleGraph = DiGraphMap<ModuleId, u32>;
+
 impl Bundler {
     pub fn new(
         working_dir: PathBuf,
@@ -58,17 +60,32 @@ impl Bundler {
         }
     }
 
-    fn add(&self, graph: &mut Graph<String, usize>, info: &TransformedModule) {
-        graph.add_node(info.1.name.to_string());
+    fn add(&self, graph: &mut ModuleGraph, info: &TransformedModule) -> ModuleId {
+        if graph.contains_node(info.0) {
+            return info.0;
+        }
+
+        let node = graph.add_node(info.0);
 
         let v = &info.3;
         for src in &v.side_effect_imports {
-            graph.add_node(src.src.value.to_string());
+            let to = self.add_module(graph, src.module_id);
+
+            graph.add_edge(node, to, 1);
         }
 
         for (_, src) in &v.ids {
-            graph.add_node(src.src.value.to_string());
+            let to = self.add_module(graph, src.module_id);
+
+            graph.add_edge(node, to, 1);
         }
+
+        node
+    }
+
+    fn add_module(&self, graph: &mut ModuleGraph, id: ModuleId) -> ModuleId {
+        let v = self.scope.get_module(id).unwrap();
+        self.add(graph, &(id, v.0, v.1, v.2))
     }
 
     pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
@@ -79,7 +96,7 @@ impl Bundler {
             })
             .collect::<Vec<_>>();
 
-        let mut graph = Graph::<String, usize>::new();
+        let mut graph = ModuleGraph::default();
 
         for res in results {
             let info: TransformedModule = res.context("failed to load module").unwrap();
@@ -87,7 +104,7 @@ impl Bundler {
             self.add(&mut graph, &info);
         }
 
-        println!("{}", Dot::with_config(&graph, &[]));
+        println!("{}", Dot::with_config(&graph.into_graph::<usize>(), &[]));
 
         unimplemented!()
     }
