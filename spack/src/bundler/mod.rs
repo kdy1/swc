@@ -94,10 +94,13 @@ impl Bundler {
 
         let mut graph = ModuleGraph::default();
 
+        let mut infos = Vec::with_capacity(results.len());
         for res in results {
             let info: TransformedModule = res.context("failed to load module").unwrap();
 
             self.add(&mut graph, &info);
+
+            infos.push(info);
         }
 
         println!("{}", Dot::with_config(&graph.into_graph::<usize>(), &[]));
