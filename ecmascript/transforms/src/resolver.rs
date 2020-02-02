@@ -1,7 +1,4 @@
-use crate::{
-    pass::Pass,
-    scope::{IdentType, ScopeKind},
-};
+use crate::scope::{IdentType, ScopeKind};
 use ast::*;
 use hashbrown::HashSet;
 use std::cell::RefCell;
