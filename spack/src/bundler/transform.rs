@@ -126,10 +126,7 @@ impl Bundler {
             // TODO: Report error and proceed instead of returning an error
             let (res, src): (TransformedModule, Str) = res?;
 
-            let path = match res.1.name {
-                FileName::Real(p) => p,
-                _ => unreachable!(),
-            };
+            srcs.insert(src.value, res.0);
         }
 
         Ok(())
