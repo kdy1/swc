@@ -2,7 +2,7 @@ use crate::Bundler;
 use std::mem::replace;
 use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
+use swc_ecma_utils::{find_ids, ExprExt, Id, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
@@ -65,7 +65,7 @@ where
 
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
-                if cfg!(debug_assertion) {
+                if cfg!(debug_assertions) {
                     println!("Dropping {:?}", item);
                 }
 
@@ -101,7 +101,37 @@ impl UsageTracker {
 
 impl Fold<ImportDecl> for UsageTracker {
     fn fold(&mut self, import: ImportDecl) -> ImportDecl {
+        if self.is_marked(import.span) {
+            return import;
+        }
+
         let mut import: ImportDecl = import.fold_children(self);
+
+        // TODO: Drop unused imports.
+        //      e.g) import { foo, bar } from './foo';
+        //           foo()
+
+        if let Some(changed) = &self.changed {
+            if changed.is_empty() {
+                return import;
+            }
+
+            let ids: Vec<Id> = find_ids(&import.specifiers);
+
+            println!(
+                "=========================\n{:?}\n{:?}\n=========================",
+                changed, ids,
+            );
+
+            for id in ids {
+                for c in changed {
+                    if c.sym == id.0 && c.span.ctxt() == id.1 {
+                        import.span = import.span.apply_mark(self.mark);
+                        return import;
+                    }
+                }
+            }
+        }
 
         if import.specifiers.is_empty() {
             import.span = import.span.apply_mark(self.mark);

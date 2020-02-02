@@ -1,6 +1,10 @@
 use self::scope::Scope;
-use crate::{id::ModuleIdGenerator, load::Load, resolve::Resolve, Config};
-use anyhow::Error;
+use crate::{
+    bundler::load_transformed::TransformedModule, id::ModuleIdGenerator, load::Load,
+    resolve::Resolve, Config, ModuleId,
+};
+use anyhow::{Context, Error};
+use petgraph::{dot::Dot, Graph};
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
 use swc_common::{errors::Handler, Mark, SourceFile, SourceMap};
@@ -55,25 +59,37 @@ impl Bundler {
     }
 
     pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
-        entries
+        fn add(graph: &mut Graph<String, usize>, info: &TransformedModule) {
+            graph.add_node(info.1.name.to_string());
+
+            let v = &info.3;
+            for src in &v.side_effect_imports {
+                graph.add_node(src.src.value.to_string());
+            }
+
+            for (_, src) in &v.ids {
+                graph.add_node(src.src.value.to_string());
+            }
+        }
+
+        let results = entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
-                let (_, fm, module, imports) =
-                    self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
-
-                let module = (*module).clone();
-
-                let module = self.handle_imports(module, imports)?;
-
-                Ok((fm, module))
+                Ok(self.load_transformed(&self.working_dir, &entry.to_string_lossy())?)
             })
-            .collect()
-    }
+            .collect::<Vec<_>>();
 
-    fn mark_all_as_used(&self, module: Module) -> Result<Module, Error> {
-        let module = self.drop_unused(module, None);
+        let mut graph = Graph::<String, usize>::new();
 
-        Ok(module)
+        for res in results {
+            let info: TransformedModule = res.context("failed to load module").unwrap();
+
+            add(&mut graph, &info);
+        }
+
+        println!("{}", Dot::with_config(&graph, &[]));
+
+        unimplemented!()
     }
 
     pub fn swc(&self) -> &swc::Compiler {
