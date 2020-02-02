@@ -11,6 +11,7 @@ use swc_ecma_ast::Module;
 
 mod export;
 mod import_analysis;
+mod import_handler;
 mod scope;
 mod transform;
 mod usage_analysis;
@@ -71,8 +72,6 @@ impl Bundler {
             })
             .collect()
     }
-
-    fn handle_imports(&self, module: Module, imports: Arc<ImportInfo>) -> Result<Module, Error> {}
 
     fn mark_all_as_used(&self, module: Module) -> Result<Module, Error> {
         let module = self.drop_unused(module, None);
