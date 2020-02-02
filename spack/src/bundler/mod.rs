@@ -84,15 +84,29 @@ impl Bundler {
         let results = entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
-                let m = self
+                Ok(self
                     .load_transformed(&self.working_dir, &entry.to_string_lossy())
-                    .context("load_transformed failed")?;
-
-                Ok(unimplemented!())
+                    .context("load_transformed failed")?)
             })
             .collect::<Vec<_>>();
 
-        //        // We collect at here to handle dynamic imports
+        // We collect at here to handle dynamic imports
+        // TODO: Handle dynamic imports
+
+        let mut output = vec![];
+        for res in results {
+            let res: Result<_, Error> = try {
+                let m: TransformedModule = res?;
+                let module = self
+                    .merge_modules((*m.module).clone(), &m)
+                    .context("failed to merge module")?;
+
+                (m.fm, module)
+            };
+
+            output.push(res);
+        }
+
         //
         //        let mut entries = Vec::with_capacity(entries.len());
         //
@@ -113,7 +127,7 @@ impl Bundler {
         //            infos.push(info);
         //        }
 
-        results
+        output
     }
 
     pub fn swc(&self) -> &swc::Compiler {

@@ -1,6 +1,7 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 #![feature(specialization)]
+#![feature(try_blocks)]
 
 pub use self::{
     bundler::Bundler,

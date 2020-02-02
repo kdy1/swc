@@ -1,7 +1,13 @@
 use super::Bundler;
-use crate::{chunk::Chunk, ModuleId};
-use anyhow::Error;
+use crate::{
+    bundler::{load_transformed::TransformedModule, scope::Scope},
+    chunk::Chunk,
+    ModuleId,
+};
+use anyhow::{Context, Error};
+use swc_common::errors::Handler;
 use swc_ecma_ast::*;
+use swc_ecma_utils::prepend_stmts;
 
 #[derive(Debug)]
 pub(crate) enum MergedModule {
@@ -12,29 +18,24 @@ pub(crate) enum MergedModule {
 impl Bundler {
     pub(super) fn merge_modules(
         &self,
-        entry: Module,
-        modules: &[ModuleId],
-    ) -> Result<MergedModule, Error> {
-        let mut v = Merger { to: entry };
+        mut entry: Module,
+        info: &TransformedModule,
+    ) -> Result<Module, Error> {
+        for (src, ids) in &info.merged_imports.ids {
+            //
+            if let Some(imported) = self.scope.get_module(src.module_id) {
+                let dep: Module = self.drop_unused(
+                    info.fm.name.clone(),
+                    (*info.module).clone(),
+                    Some(ids.clone()),
+                );
 
-        Ok(MergedModule::Module(v.to))
-    }
-}
+                // TODO: Handle rename
 
-#[derive(Debug)]
-struct Merger {
-    to: Module,
-}
-
-/// Returns true if loading a module has any side effect.
-fn has_side_effect(module: &Module) -> bool {
-    for item in module.body {
-        match item {
-            ModuleItem::ModuleDecl(_) => {}
-            ModuleItem::Stmt(_) => {}
+                prepend_stmts(&mut entry.body, dep.body.into_iter());
+            }
         }
-    }
 
-    // De-optimization is better than breaking a code.
-    true
+        Ok(entry)
+    }
 }

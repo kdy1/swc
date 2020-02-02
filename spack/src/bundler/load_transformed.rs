@@ -22,8 +22,8 @@ pub(super) struct TransformedModule {
 
 #[derive(Debug, Default)]
 pub(super) struct MergedImports {
-    pub ids: FxHashMap<Id, Source>,
-    pub side_effect_imports: Vec<Source>,
+    /// If imported ids are empty, it is a side-effect import.
+    pub ids: Vec<(Source, Vec<Id>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,23 +196,21 @@ impl Bundler {
                     self.scope.mark_as_dynamic(src.module_id);
                 }
 
-                if decl.specifiers.is_empty() {
-                    merged.side_effect_imports.push(src);
-                } else {
-                    for s in decl.specifiers {
-                        match s {
-                            ImportSpecifier::Specific(s) => {
-                                merged.ids.insert(Id::from(s.local), src.clone());
-                            }
-                            ImportSpecifier::Default(s) => {
-                                merged.ids.insert(Id::from(s.local), src.clone());
-                            }
-                            ImportSpecifier::Namespace(s) => {
-                                merged.ids.insert(Id::from(s.local), src.clone());
-                            }
+                // TODO: Handle rename
+                let mut ids = vec![];
+                for s in decl.specifiers {
+                    match s {
+                        ImportSpecifier::Specific(s) => ids.push(s.local.into()),
+                        ImportSpecifier::Default(s) => {
+                            ids.push(s.local.into());
+                        }
+                        ImportSpecifier::Namespace(s) => {
+                            ids.push(s.local.into());
                         }
                     }
                 }
+
+                merged.ids.push((src, ids));
             }
         }
 

@@ -1,17 +1,12 @@
-use crate::Bundler;
+use crate::{Bundler, Id};
 use swc_common::{util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
 use swc_ecma_transforms::{resolver, resolver::Resolver};
-use swc_ecma_utils::{find_ids, ExprExt, Id, StmtLike};
+use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
-    pub(super) fn drop_unused<T>(
-        &self,
-        path: FileName,
-        node: T,
-        used_exports: Option<Vec<Ident>>,
-    ) -> T
+    pub(super) fn drop_unused<T>(&self, path: FileName, node: T, used_exports: Option<Vec<Id>>) -> T
     where
         T: FoldWith<UsageTracker> + for<'any> FoldWith<Resolver<'any>>,
     {
@@ -35,7 +30,7 @@ pub(super) struct UsageTracker {
     mark: Mark,
 
     /// Identifiers which should be emitted.
-    included: Vec<Ident>,
+    included: Vec<Id>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -114,11 +109,11 @@ impl Fold<ImportDecl> for UsageTracker {
             return import;
         }
 
-        let ids: Vec<Id> = find_ids(&import.specifiers);
+        let ids: Vec<Ident> = find_ids(&import.specifiers);
 
         for id in ids {
             for c in &self.included {
-                if c.sym == id.0 && c.span.ctxt() == id.1 {
+                if *c == id {
                     import.span = import.span.apply_mark(self.mark);
                     return import;
                 }
@@ -191,7 +186,7 @@ impl Fold<Ident> for UsageTracker {
                 i.sym,
                 i.span.ctxt()
             );
-            self.included.push(i.clone());
+            self.included.push((&i).into());
         }
 
         i
@@ -214,7 +209,7 @@ impl Fold<VarDecl> for UsageTracker {
 
         for i in ids {
             for i1 in &self.included {
-                if i1.sym == i.sym {
+                if *i1 == i {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
                         ..var
