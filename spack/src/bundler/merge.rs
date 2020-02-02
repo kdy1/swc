@@ -2,7 +2,7 @@ use super::Bundler;
 use anyhow::Error;
 use fxhash::FxHashMap;
 use std::sync::Arc;
-use swc_common::{Fold, FromVariant};
+use swc_atoms::JsWord;
 use swc_ecma_ast::Module;
 
 #[derive(Debug)]
