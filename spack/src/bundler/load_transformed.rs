@@ -29,6 +29,7 @@ pub(super) struct MergedImports {
 #[derive(Debug, Clone)]
 pub(super) struct Source {
     pub is_dynamic: bool,
+    pub is_unconditional: bool,
 
     pub module_id: ModuleId,
     // Clone is relatively cheap, thanks to string_cache.
@@ -152,14 +153,14 @@ impl Bundler {
 
         let loaded = imports
             .into_par_iter()
-            .chain(partial_requires)
-            .map(|v| (v, false))
+            .map(|v| (v, false, true))
+            .chain(partial_requires.into_par_iter().map(|v| (v, false, false)))
             .chain(
                 requires
                     .into_par_iter()
-                    .map(|v| (v, false))
-                    .chain(dynamic_imports.into_par_iter().map(|v| (v, true)))
-                    .map(|(src, dynamic)| {
+                    .map(|v| (v, false, false))
+                    .chain(dynamic_imports.into_par_iter().map(|v| (v, true, false)))
+                    .map(|(src, dynamic, unconditional)| {
                         (
                             ImportDecl {
                                 span: src.span,
@@ -167,24 +168,26 @@ impl Bundler {
                                 src,
                             },
                             dynamic,
+                            unconditional,
                         )
                     }),
             )
-            .map(|(decl, dynamic)| -> Result<_, Error> {
+            .map(|(decl, dynamic, unconditional)| -> Result<_, Error> {
                 //
                 let res = self.load_transformed_inner(base, &decl.src.value)?;
 
-                Ok((res, decl, dynamic))
+                Ok((res, decl, dynamic, unconditional))
             })
             .collect::<Vec<_>>();
 
         for res in loaded {
             // TODO: Report error and proceed instead of returning an error
-            let ((path, res), decl, is_dynamic) = res?;
+            let ((path, res), decl, is_dynamic, is_unconditional) = res?;
 
             if let Some(src) = self.scope.get_module_by_path(&path) {
                 let src = Source {
                     is_dynamic,
+                    is_unconditional,
                     module_id: src.id,
                     src: decl.src,
                 };

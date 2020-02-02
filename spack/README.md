@@ -16,6 +16,9 @@ If those are marked with correct hygiene id,
 it will be resolved differently and can be removed by uglifyjs.
 
 
+## TODOs
+ - [ ] Handle unconditional requires.
+
 
 # Fixture tests
 
