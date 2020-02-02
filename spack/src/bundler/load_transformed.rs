@@ -5,7 +5,7 @@ use fxhash::FxHashMap;
 use rayon::prelude::*;
 use std::{path::Path, sync::Arc};
 use swc_common::{FileName, SourceFile};
-use swc_ecma_ast::{Module, Program, Str};
+use swc_ecma_ast::{ImportDecl, Module, Program, Str};
 
 /// Module after applying transformations.
 pub(super) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<MergedImports>);
@@ -27,7 +27,7 @@ impl Bundler {
     /// Phase 1 (discovery)
     ///
     /// We apply transforms at this phase to make cache efficient.
-    /// As we cache in this phase, changing dependency does not affect cache.  
+    /// As we cache in this phase, changing dependency does not affect cache.
     pub(super) fn load_transformed(
         &self,
         base: &Path,
@@ -125,26 +125,28 @@ impl Bundler {
 
         let loaded = imports
             .into_par_iter()
-            .map(|import| import.src)
-            .chain(partial_requires.into_par_iter().map(|require| require.src))
-            .chain(requires)
-            .chain(dynamic_imports)
-            .map(|src| -> Result<_, Error> {
+            .chain(partial_requires)
+            .chain(
+                requires
+                    .into_par_iter()
+                    .chain(dynamic_imports.into_par_iter())
+                    .map(|src| ImportDecl {
+                        span: src.span,
+                        specifiers: vec![],
+                        src,
+                    }),
+            )
+            .map(|decl| -> Result<_, Error> {
                 //
-                let res = self.load_transformed(base, &src.value)?;
+                let res = self.load_transformed(base, &decl.src.value)?;
 
-                Ok((res, src))
+                Ok((res, decl))
             })
             .collect::<Vec<_>>();
 
         for res in loaded {
             // TODO: Report error and proceed instead of returning an error
-            let (res, src): (TransformedModule, Str) = res?;
-
-            merged.ids.extend(res.3.ids.clone());
-            merged
-                .side_effect_imports
-                .extend(res.3.side_effect_imports.clone());
+            let (res, decl): (TransformedModule, ImportDecl) = res?;
         }
 
         Ok(merged)
