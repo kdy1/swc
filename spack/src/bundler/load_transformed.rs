@@ -4,6 +4,7 @@ use anyhow::{Context, Error};
 use fxhash::FxHashMap;
 use rayon::prelude::*;
 use std::{
+    fs::canonicalize,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -48,6 +49,7 @@ impl Bundler {
             .resolver
             .resolve(base, s)
             .context("failed to resolve")?;
+        let path = canonicalize(path).context("failed to canonicalize")?;
 
         let path = Arc::new(path);
         if let Some(cached) = self.scope.cache.get(&path) {
@@ -161,7 +163,7 @@ impl Bundler {
             let ((path, res), decl): ((Arc<PathBuf>, TransformedModule), ImportDecl) = res?;
 
             if let Some(v) = self.scope.cache.get(&path) {
-                let src = self.scope.cache.get(&path).unwrap().value();
+                let src = v.value();
                 let src = Source {
                     module_id: src.0,
                     src: decl.src,
@@ -172,10 +174,14 @@ impl Bundler {
                 } else {
                     for s in decl.specifiers {
                         match s {
-                            ImportSpecifier::Specific(s) => {}
-                            ImportSpecifier::Default(s) => merged.ids.insert(s.local, src),
+                            ImportSpecifier::Specific(s) => {
+                                merged.ids.insert(Id::from(s.local), src.clone());
+                            }
+                            ImportSpecifier::Default(s) => {
+                                merged.ids.insert(Id::from(s.local), src.clone());
+                            }
                             ImportSpecifier::Namespace(s) => {
-                                merged.ids.insert(Id::from(s.local), src)
+                                merged.ids.insert(Id::from(s.local), src.clone());
                             }
                         }
                     }
