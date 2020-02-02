@@ -1,9 +1,6 @@
 use self::scope::Scope;
-use crate::{
-    bundler::load_transformed::TransformedModule, load::Load, resolve::Resolve, Config, ModuleId,
-};
+use crate::{bundler::load_transformed::TransformedModule, load::Load, resolve::Resolve, Config};
 use anyhow::{Context, Error};
-use petgraph::{dot::Dot, graphmap::DiGraphMap};
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
 use swc_common::{Mark, SourceFile};
@@ -34,8 +31,6 @@ pub struct Bundler {
     scope: Scope,
 }
 
-type ModuleGraph = DiGraphMap<ModuleId, u32>;
-
 impl Bundler {
     pub fn new(
         working_dir: PathBuf,
@@ -57,7 +52,7 @@ impl Bundler {
         }
     }
 
-    fn add(&self, graph: &mut ModuleGraph, info: &TransformedModule) -> ModuleId {
+    /*fn add(&self, graph: &mut ModuleGraph, info: &TransformedModule) -> ModuleId {
         if graph.contains_node(info.0) {
             return info.0;
         }
@@ -83,30 +78,42 @@ impl Bundler {
     fn add_module(&self, graph: &mut ModuleGraph, id: ModuleId) -> ModuleId {
         let v = self.scope.get_module(id).unwrap();
         self.add(graph, &(id, v.0, v.1, v.2))
-    }
+    }*/
 
     pub fn bundle(&self, entries: &[PathBuf]) -> Vec<Result<(Arc<SourceFile>, Module), Error>> {
         let results = entries
             .into_par_iter()
             .map(|entry: &PathBuf| -> Result<_, Error> {
-                Ok(self.load_transformed(&self.working_dir, &entry.to_string_lossy())?)
+                let m = self
+                    .load_transformed(&self.working_dir, &entry.to_string_lossy())
+                    .context("load_transformed failed")?;
+
+                Ok(unimplemented!())
             })
             .collect::<Vec<_>>();
 
-        let mut graph = ModuleGraph::default();
+        //        // We collect at here to handle dynamic imports
+        //
+        //        let mut entries = Vec::with_capacity(entries.len());
+        //
+        //        {
+        //            for res in results {
+        //                let m: TransformedModule = res?;
+        //
+        //                if m.3.is_dynamic {}
+        //            }
+        //        }
+        // We does not support chunking yet.
+        // TODO: chunk
+        //        let mut graph = ModuleGraph::default();
+        //        let mut infos = Vec::with_capacity(results.len());
+        //        for res in results {
+        //            let info: TransformedModule = res.unwrap();
+        //            self.add(&mut graph, &info);
+        //            infos.push(info);
+        //        }
 
-        let mut infos = Vec::with_capacity(results.len());
-        for res in results {
-            let info: TransformedModule = res.context("failed to load module").unwrap();
-
-            self.add(&mut graph, &info);
-
-            infos.push(info);
-        }
-
-        println!("{}", Dot::with_config(&graph.into_graph::<usize>(), &[]));
-
-        unimplemented!()
+        results
     }
 
     pub fn swc(&self) -> &swc::Compiler {

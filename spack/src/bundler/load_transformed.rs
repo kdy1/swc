@@ -11,7 +11,14 @@ use swc_common::{FileName, SourceFile};
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
 /// Module after applying transformations.
-pub(super) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<MergedImports>);
+#[derive(Debug, Clone)]
+pub(super) struct TransformedModule {
+    pub id: ModuleId,
+    pub fm: Arc<SourceFile>,
+    pub module: Arc<Module>,
+    pub merged_imports: Arc<MergedImports>,
+    pub is_dynamic: bool,
+}
 
 #[derive(Debug, Default)]
 pub(super) struct MergedImports {
@@ -21,6 +28,8 @@ pub(super) struct MergedImports {
 
 #[derive(Debug, Clone)]
 pub(super) struct Source {
+    pub is_dynamic: bool,
+
     pub module_id: ModuleId,
     // Clone is relatively cheap, thanks to string_cache.
     pub src: Str,
@@ -121,7 +130,13 @@ impl Bundler {
         let imports = imports?;
         let module = Arc::new(module?);
 
-        Ok((id, fm, module, Arc::new(imports)))
+        Ok(TransformedModule {
+            id,
+            fm,
+            module,
+            merged_imports: Arc::new(imports),
+            is_dynamic: false,
+        })
     }
 
     fn load_imports(&self, base: &Path, info: ImportInfo) -> Result<MergedImports, Error> {
@@ -138,31 +153,39 @@ impl Bundler {
         let loaded = imports
             .into_par_iter()
             .chain(partial_requires)
+            .map(|v| (v, false))
             .chain(
                 requires
                     .into_par_iter()
-                    .chain(dynamic_imports.into_par_iter())
-                    .map(|src| ImportDecl {
-                        span: src.span,
-                        specifiers: vec![],
-                        src,
+                    .map(|v| (v, false))
+                    .chain(dynamic_imports.into_par_iter().map(|v| (v, true)))
+                    .map(|(src, dynamic)| {
+                        (
+                            ImportDecl {
+                                span: src.span,
+                                specifiers: vec![],
+                                src,
+                            },
+                            dynamic,
+                        )
                     }),
             )
-            .map(|decl| -> Result<_, Error> {
+            .map(|(decl, dynamic)| -> Result<_, Error> {
                 //
                 let res = self.load_transformed_inner(base, &decl.src.value)?;
 
-                Ok((res, decl))
+                Ok((res, decl, dynamic))
             })
             .collect::<Vec<_>>();
 
         for res in loaded {
             // TODO: Report error and proceed instead of returning an error
-            let ((path, res), decl): ((Arc<PathBuf>, TransformedModule), ImportDecl) = res?;
+            let ((path, res), decl, is_dynamic) = res?;
 
             if let Some(src) = self.scope.get_module_by_path(&path) {
                 let src = Source {
-                    module_id: src.0,
+                    is_dynamic,
+                    module_id: src.id,
                     src: decl.src,
                 };
 
