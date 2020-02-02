@@ -19,7 +19,7 @@ pub(super) struct Scope {
     /// Phase 1 cache
     cache: DashMap<Arc<PathBuf>, TransformedModule>,
     /// Phase 1 cache
-    modules: DashMap<ModuleId, ModuleWithMetadata>,
+    modules: DashMap<ModuleId, ModuleWithMetadata, FxBuildHasher>,
 
     /// Marks applied to bindings
     pub module_marks: DashMap<ModuleId, Mark, FxBuildHasher>,
