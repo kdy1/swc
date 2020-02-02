@@ -64,7 +64,6 @@ impl Bundler {
                 let module = (*module).clone();
 
                 let module = self.handle_imports(module, imports)?;
-                let module = self.mark_all_as_used(module)?;
 
                 Ok((fm, module))
             })
