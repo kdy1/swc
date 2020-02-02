@@ -25,25 +25,33 @@ impl JsLoader {
 
 impl Load for JsLoader {
     fn load(&self, path: &Path) -> Result<(Arc<SourceFile>, Module), Error> {
-        log::debug!("JsLoader.load({})", path.display());
+        self.compiler.run(|| {
+            log::debug!("JsLoader.load({})", path.display());
 
-        let fm = self.compiler.cm.load_file(path)?;
+            let fm = self.compiler.cm.load_file(path)?;
 
-        log::trace!("JsLoader.load: loaded");
+            log::trace!("JsLoader.load: loaded");
 
-        let config = self.compiler.config_for_file(&self.options, &fm)?;
+            let config = self.compiler.config_for_file(&self.options, &fm)?;
 
-        log::trace!("JsLoader.load: loaded config");
+            log::trace!("JsLoader.load: loaded config");
 
-        let program =
-            self.compiler
-                .parse_js(fm.clone(), config.target, config.syntax, true, true)?;
+            let program =
+                self.compiler
+                    .parse_js(fm.clone(), config.target, config.syntax, true, true)?;
 
-        log::trace!("JsLoader.load: parsed");
+            log::trace!("JsLoader.load: parsed");
 
-        match program {
-            Program::Module(m) => Ok((fm, m)),
-            Program::Script(_) => unreachable!(),
-        }
+            // Process module
+
+            let program = self
+                .swc
+                .transform(program, config.external_helpers, config.pass);
+
+            match program {
+                Program::Module(module) => Ok((fm, module)),
+                _ => unreachable!(),
+            }
+        })
     }
 }
