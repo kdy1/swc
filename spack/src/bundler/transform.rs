@@ -108,44 +108,25 @@ impl Bundler {
             dynamic_imports,
         } = info;
 
-        rayon::join(
-            || {
-                rayon::join(
-                    || {
-                        // imports
-                        imports
-                            .into_par_iter()
-                            .map(|import| self.load_transformed(base, &import.src.value))
-                            .collect::<Vec<_>>()
-                    },
-                    || {
-                        // Partial requires
-                        partial_requires
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.src.value))
-                            .collect::<Vec<_>>()
-                    },
-                )
-            },
-            || {
-                rayon::join(
-                    || {
-                        // Requires
-                        requires
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.value))
-                            .collect::<Vec<_>>()
-                    },
-                    || {
-                        // Dynamic imports
-                        dynamic_imports
-                            .into_par_iter()
-                            .map(|require| self.load_transformed(base, &require.value))
-                            .collect::<Vec<_>>()
-                    },
-                )
-            },
-        );
+        let loaded = imports
+            .into_par_iter()
+            .map(|import| self.load_transformed(base, &import.src.value))
+            .chain(partial_requires.into_par_iter().map(|require| {
+                // Partial requires
+                self.load_transformed(base, &require.src.value)
+            }))
+            .chain(requires.into_par_iter().map(|require| {
+                // Requires
+
+                self.load_transformed(base, &require.value)
+            }))
+            .chain(
+                dynamic_imports
+                    .into_par_iter()
+                    .map(|require| self.load_transformed(base, &require.value)),
+            )
+            .collect::<Vec<_>>();
+
         Ok(())
     }
 }
