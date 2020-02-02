@@ -7,16 +7,12 @@ use swc_ecma_parser::JscTarget;
 
 /// JavaScript loader
 pub struct JsLoader {
-    compiler: swc::Compiler,
+    compiler: Arc<swc::Compiler>,
     options: swc::config::Options,
 }
 
 impl JsLoader {
-    pub fn new(
-        cm: Arc<SourceMap>,
-        handler: Arc<Handler>,
-        mut options: swc::config::Options,
-    ) -> Self {
+    pub fn new(compiler: Arc<swc::Compiler>, mut options: swc::config::Options) -> Self {
         if options.config.is_none() {
             options.config = Some(Default::default());
         }
@@ -28,10 +24,7 @@ impl JsLoader {
             v.minify = Some(false);
         }
 
-        JsLoader {
-            compiler: swc::Compiler::new(cm, handler),
-            options,
-        }
+        JsLoader { compiler, options }
     }
 }
 

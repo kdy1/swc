@@ -22,7 +22,7 @@ pub struct Bundler {
     config: Config,
 
     /// Javascript compiler.
-    swc: swc::Compiler,
+    swc: Arc<swc::Compiler>,
     swc_options: swc::config::Options,
 
     module_id_gen: ModuleIdGenerator,
@@ -38,23 +38,23 @@ pub struct Bundler {
 
 impl Bundler {
     pub fn new(
-        cm: Arc<SourceMap>,
-        handler: Arc<Handler>,
         working_dir: PathBuf,
-        swc: swc::config::Options,
+        swc: Arc<swc::Compiler>,
+        swc_options: swc::config::Options,
         resolver: Box<dyn Resolve + Sync>,
         loader: Box<dyn Load + Sync>,
     ) -> Self {
+        let used_mark = swc.run(|| Mark::fresh(Mark::root()));
         Bundler {
             working_dir,
             config: Config { tree_shake: true },
-            swc: swc::Compiler::new(cm, handler),
-            swc_options: swc,
+            swc,
+            swc_options,
             loader,
             resolver,
             scope: Default::default(),
             module_id_gen: Default::default(),
-            used_mark: Mark::fresh(Mark::root()),
+            used_mark,
         }
     }
 

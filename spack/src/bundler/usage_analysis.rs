@@ -116,11 +116,6 @@ impl Fold<ImportDecl> for UsageTracker {
 
         let ids: Vec<Id> = find_ids(&import.specifiers);
 
-        println!(
-            "=========================\n{}\n{:?}\n{:?}\n=========================",
-            self.path, self.changed, ids,
-        );
-
         for id in ids {
             for c in &self.changed {
                 if c.sym == id.0 && c.span.ctxt() == id.1 {
@@ -190,7 +185,7 @@ impl Fold<Ident> for UsageTracker {
         }
 
         if self.marking_phase {
-            println!(
+            log::debug!(
                 "UsageTracker:{}\nMarking {}{:?} as used",
                 self.path,
                 i.sym,
