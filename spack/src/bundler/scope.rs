@@ -38,6 +38,6 @@ impl Scope {
         Some(self.cache.get(path)?.value().clone())
     }
     pub fn get_module(&self, id: ModuleId) -> Option<ModuleWithMetadata> {
-        Some(self.modules.get(id)?.value().clone())
+        Some(self.modules.get(&id)?.value().clone())
     }
 }
