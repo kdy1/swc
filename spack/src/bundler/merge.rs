@@ -5,7 +5,7 @@ use crate::{
     ModuleId,
 };
 use anyhow::{Context, Error};
-use swc_common::errors::Handler;
+use swc_common::{errors::Handler, fold::FoldWith, Fold};
 use swc_ecma_ast::*;
 use swc_ecma_utils::prepend_stmts;
 
@@ -25,17 +25,36 @@ impl Bundler {
             //
             if let Some(imported) = self.scope.get_module(src.module_id) {
                 let dep: Module = self.drop_unused(
-                    info.fm.name.clone(),
-                    (*info.module).clone(),
+                    imported.fm.name.clone(),
+                    (*imported.module).clone(),
                     Some(ids.clone()),
                 );
+                let dep = dep.fold_with(&mut Unexporter);
 
-                // TODO: Handle rename
+                // TODO: Handle renaming
 
                 prepend_stmts(&mut entry.body, dep.body.into_iter());
             }
         }
 
         Ok(entry)
+    }
+}
+
+/// `export var a = 1` => `var a = 1`
+struct Unexporter;
+
+impl Fold<ModuleItem> for Unexporter {
+    fn fold(&mut self, item: ModuleItem) -> ModuleItem {
+        match item {
+            ModuleItem::ModuleDecl(decl) => match decl {
+                ModuleDecl::ExportDecl(decl) => ModuleItem::Stmt(Stmt::Decl(decl.decl)),
+
+                // TODO: Handle all
+                _ => ModuleItem::ModuleDecl(decl),
+            },
+
+            _ => item,
+        }
     }
 }
