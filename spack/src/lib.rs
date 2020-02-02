@@ -10,6 +10,7 @@ pub use self::{
 mod bundler;
 mod id;
 pub mod load;
+pub mod loaders;
 pub mod resolve;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
