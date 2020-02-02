@@ -3,7 +3,7 @@ use anyhow::Error;
 use std::{path::Path, sync::Arc};
 use swc_common::SourceFile;
 use swc_ecma_ast::{Module, Program};
-use swc_ecma_parser::JscTarget;
+use swc_ecma_parser::{JscTarget, Syntax};
 
 /// JavaScript loader
 pub struct JsLoader {
@@ -22,6 +22,8 @@ impl JsLoader {
             // TODO: Some(Esm)
             v.module = None;
             v.minify = Some(false);
+
+            v.jsc.target = JscTarget::Es2019;
         }
 
         JsLoader { compiler, options }
