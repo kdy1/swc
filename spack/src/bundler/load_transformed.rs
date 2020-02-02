@@ -49,7 +49,6 @@ impl Bundler {
             .resolver
             .resolve(base, s)
             .context("failed to resolve")?;
-        let path = canonicalize(path).context("failed to canonicalize")?;
 
         let path = Arc::new(path);
         if let Some(cached) = self.scope.cache.get(&path) {
