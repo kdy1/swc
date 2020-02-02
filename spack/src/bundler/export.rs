@@ -1,12 +1,43 @@
+use super::Bundler;
 use crate::Id;
+use anyhow::Error;
+use std::mem::replace;
 use swc_common::{Fold, FoldWith, DUMMY_SP};
 use swc_ecma_ast::*;
+
+impl Bundler {
+    /// This method removes exported pure constants from the module.
+    ///
+    /// A pure constant is a exported literal.
+    ///
+    ///
+    /// TODO: Support pattern like
+    ///     export const [a, b] = [1, 2]
+    pub(super) fn extract_export_info(&self, module: &mut Module) -> Result<ExportInfo, Error> {
+        let mut v = ExportFinder::default();
+
+        let m = replace(
+            module,
+            Module {
+                span: DUMMY_SP,
+                body: vec![],
+                shebang: None,
+            },
+        );
+        let m = m.fold_with(&mut v);
+
+        *module = m;
+
+        Ok((v.info))
+    }
+}
 
 #[derive(Debug, Default)]
 pub(super) struct ExportInfo {
     pub pure_constants: Vec<(Id, Lit)>,
 }
 
+#[derive(Debug, Default)]
 struct ExportFinder {
     info: ExportInfo,
 }

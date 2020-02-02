@@ -60,6 +60,7 @@ impl Bundler {
             .map(|entry: &PathBuf| -> Result<_, Error> {
                 let (_, fm, module, imports) =
                     self.load_transformed(&self.working_dir, &entry.to_string_lossy())?;
+
                 let module = (*module).clone();
 
                 let module = self.handle_imports(module, imports)?;
