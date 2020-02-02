@@ -30,8 +30,16 @@ impl Fold<Expr> for Folder<'_> {
         let e: Expr = e.fold_children(self);
 
         match e {
-            Expr::Ident(i) => {
+            Expr::Ident(ref i) => {
                 // Replace ident with constant, if possible
+                for import in self
+                    .imports
+                    .imports
+                    .iter()
+                    .chain(&self.imports.partial_requires)
+                {
+                    for sp in &import.specifiers {}
+                }
             }
 
             _ => {}
