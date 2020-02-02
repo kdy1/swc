@@ -1,8 +1,5 @@
 use self::scope::Scope;
-use crate::{
-    bundler::import_analysis::ImportInfo, id::ModuleIdGenerator, load::Load, resolve::Resolve,
-    Config,
-};
+use crate::{id::ModuleIdGenerator, load::Load, resolve::Resolve, Config};
 use anyhow::Error;
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
