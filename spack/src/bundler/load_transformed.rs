@@ -3,9 +3,12 @@ use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
 use anyhow::{Context, Error};
 use fxhash::FxHashMap;
 use rayon::prelude::*;
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use swc_common::{FileName, SourceFile};
-use swc_ecma_ast::{ImportDecl, Module, Program, Str};
+use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
 /// Module after applying transformations.
 pub(super) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<MergedImports>);
@@ -33,13 +36,22 @@ impl Bundler {
         base: &Path,
         s: &str,
     ) -> Result<TransformedModule, Error> {
+        Ok(self.load_transformed_inner(base, s)?.1)
+    }
+
+    fn load_transformed_inner(
+        &self,
+        base: &Path,
+        s: &str,
+    ) -> Result<(Arc<PathBuf>, TransformedModule), Error> {
         let path = self
             .resolver
             .resolve(base, s)
             .context("failed to resolve")?;
 
+        let path = Arc::new(path);
         if let Some(cached) = self.scope.cache.get(&path) {
-            return Ok(cached.clone());
+            return Ok((path, cached.clone()));
         }
 
         let (id, fm, module) = self.load(&path).context("Bundler.load failed")?;
@@ -48,9 +60,9 @@ impl Bundler {
             .transform_module(id, fm.clone(), module)
             .context("failed to transform module")?;
 
-        self.scope.cache.insert(Arc::new(path), v.clone());
+        self.scope.cache.insert(path.clone(), v.clone());
 
-        Ok(v)
+        Ok((path, v))
     }
 
     fn load(&self, path: &Path) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
@@ -138,7 +150,7 @@ impl Bundler {
             )
             .map(|decl| -> Result<_, Error> {
                 //
-                let res = self.load_transformed(base, &decl.src.value)?;
+                let res = self.load_transformed_inner(base, &decl.src.value)?;
 
                 Ok((res, decl))
             })
@@ -146,7 +158,29 @@ impl Bundler {
 
         for res in loaded {
             // TODO: Report error and proceed instead of returning an error
-            let (res, decl): (TransformedModule, ImportDecl) = res?;
+            let ((path, res), decl): ((Arc<PathBuf>, TransformedModule), ImportDecl) = res?;
+
+            if let Some(v) = self.scope.cache.get(&path) {
+                let src = self.scope.cache.get(&path).unwrap().value();
+                let src = Source {
+                    module_id: src.0,
+                    src: decl.src,
+                };
+
+                if decl.specifiers.is_empty() {
+                    merged.side_effect_imports.push(src);
+                } else {
+                    for s in decl.specifiers {
+                        match s {
+                            ImportSpecifier::Specific(s) => {}
+                            ImportSpecifier::Default(s) => merged.ids.insert(s.local, src),
+                            ImportSpecifier::Namespace(s) => {
+                                merged.ids.insert(Id::from(s.local), src)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(merged)
