@@ -4,7 +4,7 @@ use anyhow::{Context, Error};
 use rayon::prelude::*;
 use std::{path::Path, sync::Arc};
 use swc_common::{FileName, SourceFile};
-use swc_ecma_ast::{Module, Program};
+use swc_ecma_ast::{Module, Program, Str};
 
 /// Module after applying transformations.
 pub(crate) type TransformedModule = (ModuleId, Arc<SourceFile>, Arc<Module>, Arc<ImportInfo>);
@@ -110,26 +110,26 @@ impl Bundler {
 
         let loaded = imports
             .into_par_iter()
-            .map(|import| self.load_transformed(base, &import.src.value))
-            .chain(partial_requires.into_par_iter().map(|require| {
-                // Partial requires
-                self.load_transformed(base, &require.src.value)
-            }))
-            .chain(requires.into_par_iter().map(|require| {
-                // Requires
+            .map(|import| import.src)
+            .chain(partial_requires.into_par_iter().map(|require| require.src))
+            .chain(*requires)
+            .chain(*dynamic_imports)
+            .map(|src| -> Result<_, Error> {
+                //
+                let res = self.load_transformed(base, &src.value)?;
 
-                self.load_transformed(base, &require.value)
-            }))
-            .chain(
-                dynamic_imports
-                    .into_par_iter()
-                    .map(|require| self.load_transformed(base, &require.value)),
-            )
+                Ok((res, src))
+            })
             .collect::<Vec<_>>();
 
-        let mut buf = Vec::with_capacity(loaded.len());
         for res in loaded {
-            buf.push(res?);
+            // TODO: Report error and proceed instead of returning an error
+            let (res, src): (TransformedModule, Str) = res?;
+
+            let path = match res.1.name {
+                FileName::Real(p) => p,
+                _ => unreachable!(),
+            };
         }
 
         Ok(())
