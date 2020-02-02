@@ -1,16 +1,22 @@
 use crate::Bundler;
-use std::mem::replace;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith, Mark, Span, Spanned};
+use std::{fs::File, mem::replace};
+use swc_common::{util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, Span, Spanned};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{find_ids, ExprExt, Id, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
-    pub(super) fn drop_unused<T>(&self, node: T, used_exports: Option<Vec<Ident>>) -> T
+    pub(super) fn drop_unused<T>(
+        &self,
+        path: FileName,
+        node: T,
+        used_exports: Option<Vec<Ident>>,
+    ) -> T
     where
         T: FoldWith<UsageTracker>,
     {
         let mut v = UsageTracker {
+            path,
             pass_cnt: 0,
             mark: self.used_mark,
             changed: used_exports,
@@ -31,6 +37,7 @@ pub(super) struct UsageTracker {
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
+    path: FileName,
 }
 
 impl<T> Fold<Vec<T>> for UsageTracker
@@ -66,7 +73,7 @@ where
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
                 if cfg!(debug_assertions) {
-                    println!("Dropping {:?}", item);
+                    println!("{}\nDropping {:?}", self.path, item);
                 }
 
                 return None;
@@ -119,8 +126,8 @@ impl Fold<ImportDecl> for UsageTracker {
             let ids: Vec<Id> = find_ids(&import.specifiers);
 
             println!(
-                "=========================\n{:?}\n{:?}\n=========================",
-                changed, ids,
+                "=========================\n{}\n{:?}\n{:?}\n=========================",
+                self.path, changed, ids,
             );
 
             for id in ids {
