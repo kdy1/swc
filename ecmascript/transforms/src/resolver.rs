@@ -13,7 +13,7 @@ mod tests;
 
 const LOG: bool = false;
 
-pub fn resolver() -> impl Pass + 'static {
+pub fn resolver() -> Resolver<'static> {
     Resolver::new(
         Mark::fresh(Mark::root()),
         Scope::new(ScopeKind::Fn, None),
@@ -56,7 +56,7 @@ impl<'a> Scope<'a> {
 /// ## Hoisting phase
 ///
 /// ## Resolving phase
-struct Resolver<'a> {
+pub struct Resolver<'a> {
     hoist: bool,
     mark: Mark,
     current: Scope<'a>,
