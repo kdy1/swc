@@ -45,7 +45,7 @@ impl Load for JsLoader {
             // Process module
 
             let program = self
-                .swc
+                .compiler
                 .transform(program, config.external_helpers, config.pass);
 
             match program {
