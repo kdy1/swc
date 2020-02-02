@@ -21,6 +21,7 @@ impl Bundler {
         mut entry: Module,
         info: &TransformedModule,
     ) -> Result<Module, Error> {
+        let mut buf = vec![];
         for (src, ids) in &info.merged_imports.ids {
             //
             if let Some(imported) = self.scope.get_module(src.module_id) {
@@ -32,10 +33,11 @@ impl Bundler {
                 let dep = dep.fold_with(&mut Unexporter);
 
                 // TODO: Handle renaming
-
-                prepend_stmts(&mut entry.body, dep.body.into_iter());
+                buf.extend(dep.body);
             }
         }
+
+        prepend_stmts(&mut entry.body, buf.into_iter());
 
         Ok(entry)
     }
