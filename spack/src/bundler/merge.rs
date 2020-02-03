@@ -2,6 +2,7 @@ use super::Bundler;
 use crate::{
     bundler::{load_transformed::TransformedModule, scope::Scope},
     chunk::Chunk,
+    util::IdentMarker,
     ModuleId,
 };
 use anyhow::{Context, Error};
@@ -28,7 +29,10 @@ impl Bundler {
             if let Some(imported) = self.scope.get_module(src.module_id) {
                 let dep = (*imported.module).clone();
                 let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
-                let dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
+                let dep = dep
+                    .fold_with(&mut Unexporter)
+                    .fold_with(&mut dce())
+                    .fold_with(&mut IdentMarker(imported.mark()));
 
                 // TODO: Handle renaming
                 buf.extend(dep.body);
