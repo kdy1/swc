@@ -26,7 +26,7 @@ impl Bundler {
             //
             if let Some(imported) = self.scope.get_module(src.module_id) {
                 let dep: Module = self.drop_unused(
-                    imported.fm.name.clone(),
+                    imported.fm.clone(),
                     (*imported.module).clone(),
                     Some(ids.clone()),
                 );

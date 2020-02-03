@@ -81,7 +81,7 @@ impl Bundler {
         let path = Arc::new(path);
 
         let (fm, module) = self.loader.load(&path).context("Loader.load failed")?;
-        let module = self.drop_unused(fm.name.clone(), module, None);
+        let module = self.drop_unused(fm.clone(), module, None);
 
         Ok((module_id, fm, module))
     }

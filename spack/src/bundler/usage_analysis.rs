@@ -1,17 +1,22 @@
 use crate::{Bundler, Id};
-use swc_common::{util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, Span, Spanned};
+use std::sync::Arc;
+use swc_common::{
+    util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned,
+};
 use swc_ecma_ast::*;
 use swc_ecma_transforms::{resolver, resolver::Resolver};
 use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
 
 impl Bundler {
     /// If used_exports is [None], all exports are treated as exported.
-    pub(super) fn drop_unused<T>(&self, path: FileName, node: T, used_exports: Option<Vec<Id>>) -> T
-    where
-        T: FoldWith<UsageTracker> + for<'any> FoldWith<Resolver<'any>>,
-    {
+    pub(super) fn drop_unused(
+        &self,
+        fm: Arc<SourceFile>,
+        node: Module,
+        used_exports: Option<Vec<Id>>,
+    ) -> Module {
         let mut v = UsageTracker {
-            path,
+            path: fm.name.clone(),
             pass_cnt: 0,
             mark: self.used_mark,
             included: Default::default(),
@@ -19,8 +24,19 @@ impl Bundler {
             marking_phase: false,
         };
 
-        self.swc
-            .run(|| node.fold_with(&mut resolver()).fold_with(&mut v))
+        let node = self.swc.run(|| node.fold_with(&mut resolver()));
+
+        {
+            let res = self
+                .swc
+                .print(&node, fm, false, false)
+                .expect("failed to print");
+            println!("{}", res.code);
+        }
+
+        let node = self.swc.run(|| node.fold_with(&mut v));
+
+        node
     }
 }
 
@@ -149,10 +165,41 @@ impl Fold<ExportDecl> for UsageTracker {
             return node;
         }
 
-        // TODO: Export only when it's required. (i.e. check self.used_exports)
+        let i = match node.decl {
+            Decl::Class(ClassDecl { ref ident, .. }) | Decl::Fn(FnDecl { ref ident, .. }) => ident,
 
-        node.span = node.span.apply_mark(self.mark);
-        node.decl = self.fold_in_marking_phase(node.decl);
+            // Preserve types
+            Decl::TsInterface(_) | Decl::TsTypeAlias(_) | Decl::TsEnum(_) | Decl::TsModule(_) => {
+                node.span = node.span.apply_mark(self.mark);
+                return node;
+            }
+
+            // Preserve only exported variables
+            Decl::Var(ref mut v) => {
+                // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+                node.span = node.span.apply_mark(self.mark);
+                node.decl = self.fold_in_marking_phase(node.decl);
+                return node;
+            }
+        };
+
+        if self.used_exports.is_none()
+            || self
+                .used_exports
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|exported| exported == i)
+        {
+            println!(
+                "====================\n{}\n{:?}\n\tMatched: {:?}",
+                self.path, self.used_exports, i
+            );
+
+            node.span = node.span.apply_mark(self.mark);
+            node.decl = self.fold_in_marking_phase(node.decl);
+        }
 
         node
     }
@@ -245,7 +292,7 @@ impl Fold<Ident> for UsageTracker {
         }
 
         if self.marking_phase {
-            log::debug!(
+            println!(
                 "UsageTracker:{}\nMarking {}{:?} as used",
                 self.path,
                 i.sym,
