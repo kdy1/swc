@@ -33,7 +33,7 @@ fn add_test<F: FnOnce() + Send + 'static>(
     tests.push(TestDescAndFn {
         desc: TestDesc {
             test_type: TestType::UnitTest,
-            name: TestName::DynTestName(name),
+            name: TestName::DynTestName(name.replace("-", "_").replace("/", "::")),
             ignore,
             should_panic: No,
             allow_fail: false,

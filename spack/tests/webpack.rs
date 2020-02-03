@@ -8,18 +8,17 @@ extern crate test;
 use spack::{loaders::swc::JsLoader, Bundler};
 use std::{
     env,
-    fs::{create_dir_all, read_dir, File},
+    fs::{create_dir_all, File},
     io::{self, Write},
     path::Path,
+    process::Command,
     sync::Arc,
 };
 use swc_common::{fold::FoldWith, FileName};
-use swc_ecma_ast::Program;
 use tempfile::tempdir_in;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
-use testing::{DropSpan, NormalizedOutput};
 use walkdir::WalkDir;
 
 fn add_test<F: FnOnce() + Send + 'static>(
@@ -34,7 +33,7 @@ fn add_test<F: FnOnce() + Send + 'static>(
     tests.push(TestDescAndFn {
         desc: TestDesc {
             test_type: TestType::UnitTest,
-            name: TestName::DynTestName(name),
+            name: TestName::DynTestName(name.replace("-", "_").replace("/", "::")),
             ignore,
             should_panic: No,
             allow_fail: false,
@@ -43,13 +42,13 @@ fn add_test<F: FnOnce() + Send + 'static>(
     });
 }
 
-fn load(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), io::Error> {
+fn load(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
     let project_dir = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
 
     let root = {
         let mut root = project_dir.clone();
         root.push("tests");
-        root.push(if errors { "error" } else { "pass" });
+        root.push("webpack");
         root
     };
 
@@ -128,6 +127,14 @@ fn load(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), io::Error> {
                         output_file
                             .write_all(code.as_bytes())
                             .expect("failed to write output to file");
+
+                        let status = Command::new("jest")
+                            .args(&["--testMatch", &format!("{}", output_path.display())])
+                            .status()
+                            .expect("failed to run jest");
+                        if status.success() {
+                            return Ok(());
+                        }
                     }
 
                     Ok(())
@@ -144,6 +151,6 @@ fn load(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), io::Error> {
 fn webpack() {
     let args: Vec<_> = env::args().collect();
     let mut tests = Vec::new();
-    load(&mut tests, true).unwrap();
+    load(&mut tests).unwrap();
     test_main(&args, tests, Some(Options::new()));
 }
