@@ -1,5 +1,8 @@
 use super::Bundler;
-use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
+use crate::{
+    bundler::{export::ExportInfo, import_analysis::ImportInfo},
+    Id, ModuleId,
+};
 use anyhow::{Context, Error};
 use is_macro::Is;
 use rayon::prelude::*;
@@ -18,6 +21,7 @@ pub(super) struct TransformedModule {
     pub fm: Arc<SourceFile>,
     pub module: Arc<Module>,
     pub merged_imports: Arc<MergedImports>,
+    pub exports: Arc<ExportInfo>,
     pub is_dynamic: bool,
 
     mark: Mark,
@@ -120,6 +124,7 @@ impl Bundler {
         log::trace!("transform_module({})", fm.name);
 
         let imports = self.extract_import_info(&mut module);
+        let exports = self.extract_export_info(&mut module);
 
         let (module, imports) = rayon::join(
             || -> Result<_, Error> {
@@ -169,6 +174,7 @@ impl Bundler {
             fm,
             module,
             merged_imports: Arc::new(imports),
+            exports: Arc::new(exports),
             is_dynamic: false,
             mark,
         })

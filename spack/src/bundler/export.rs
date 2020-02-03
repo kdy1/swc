@@ -13,7 +13,7 @@ impl Bundler {
     ///
     /// TODO: Support pattern like
     ///     export const [a, b] = [1, 2]
-    pub(super) fn extract_export_info(&self, module: &mut Module) -> Result<ExportInfo, Error> {
+    pub(super) fn extract_export_info(&self, module: &mut Module) -> ExportInfo {
         let mut v = ExportFinder::default();
 
         let m = replace(
@@ -28,7 +28,7 @@ impl Bundler {
 
         *module = m;
 
-        Ok(v.info)
+        v.info
     }
 }
 
