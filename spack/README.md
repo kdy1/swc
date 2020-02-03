@@ -17,8 +17,6 @@
  - [ ] Full require handling
    - [x] Loading
    - [ ] Optional dependency
-   
- - [ ] Optional dependency
 
 # Ideas
 
