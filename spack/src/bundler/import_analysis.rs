@@ -1,9 +1,9 @@
 use super::Bundler;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::find_ids;
+use swc_ecma_utils::{find_ids, undefined};
 
 impl Bundler {
     /// This methods removes import statements (statements like `import a as b
@@ -57,6 +57,18 @@ impl Fold<Vec<ModuleItem>> for ImportFinder {
 
             match item {
                 ModuleItem::Stmt(Stmt::Empty(..)) => None,
+                ModuleItem::Stmt(Stmt::Decl(Decl::Var(mut var))) => {
+                    var.decls.retain(|d| match d.name {
+                        Pat::Invalid(..) => false,
+                        _ => true,
+                    });
+
+                    if var.decls.is_empty() {
+                        None
+                    } else {
+                        Some(ModuleItem::Stmt(Stmt::Decl(Decl::Var(var))))
+                    }
+                }
 
                 ModuleItem::ModuleDecl(ModuleDecl::Import(i)) => {
                     self.info.imports.push(i);
@@ -76,51 +88,57 @@ impl Fold<Vec<Stmt>> for ImportFinder {
     }
 }
 
-impl Fold<CallExpr> for ImportFinder {
-    fn fold(&mut self, node: CallExpr) -> CallExpr {
-        if node.args.len() != 1 {
-            return node.fold_children(self);
-        }
-        let src = match node.args.first().unwrap() {
-            ExprOrSpread {
-                spread: None,
-                expr: box Expr::Lit(Lit::Str(s)),
-            } => s,
-            _ => return node,
-        };
+impl Fold<Expr> for ImportFinder {
+    fn fold(&mut self, e: Expr) -> Expr {
+        let e: Expr = e.fold_children(self);
 
-        match node.callee {
-            ExprOrSuper::Expr(box Expr::Ident(Ident {
-                span,
-                sym: js_word!("require"),
-                ..
-            })) => {
-                let decl = ImportDecl {
-                    span,
-                    specifiers: vec![],
-                    src: src.clone(),
+        match e {
+            Expr::Call(e) if e.args.len() == 1 => {
+                let src = match e.args.first().unwrap() {
+                    ExprOrSpread {
+                        spread: None,
+                        expr: box Expr::Lit(Lit::Str(s)),
+                    } => s,
+                    _ => return Expr::Call(e),
                 };
-                if self.top_level {
-                    self.info.imports.push(decl)
-                } else {
-                    self.info.lazy_imports.push(decl);
+
+                match e.callee {
+                    ExprOrSuper::Expr(box Expr::Ident(Ident {
+                        span,
+                        sym: js_word!("require"),
+                        ..
+                    })) => {
+                        let decl = ImportDecl {
+                            span,
+                            specifiers: vec![],
+                            src: src.clone(),
+                        };
+                        if self.top_level {
+                            self.info.imports.push(decl);
+                            return *undefined(span);
+                        } else {
+                            self.info.lazy_imports.push(decl);
+                            return Expr::Call(e);
+                        }
+                    }
+
+                    ExprOrSuper::Expr(box Expr::Ident(Ident {
+                        sym: js_word!("import"),
+                        ..
+                    })) => {
+                        self.info.dynamic_imports.push(src.clone());
+                    }
+
+                    _ => {}
                 }
 
-                return node;
-            }
-
-            ExprOrSuper::Expr(box Expr::Ident(Ident {
-                sym: js_word!("import"),
-                ..
-            })) => {
-                self.info.dynamic_imports.push(src.clone());
-                return node;
+                return Expr::Call(e);
             }
 
             _ => {}
         }
 
-        node.fold_children(self)
+        e
     }
 }
 
@@ -134,7 +152,7 @@ impl Fold<CallExpr> for ImportFinder {
 /// import { readFile } from 'fs';
 /// ```
 impl Fold<VarDeclarator> for ImportFinder {
-    fn fold(&mut self, node: VarDeclarator) -> VarDeclarator {
+    fn fold(&mut self, mut node: VarDeclarator) -> VarDeclarator {
         match node.init {
             Some(box Expr::Call(CallExpr {
                 span,
@@ -173,9 +191,12 @@ impl Fold<VarDeclarator> for ImportFinder {
 
                 if self.top_level {
                     self.info.imports.push(decl);
-                } else {
-                    self.info.lazy_imports.push(decl);
+                    node.init = None;
+                    node.name = Pat::Invalid(Invalid { span: DUMMY_SP });
+                    return node;
                 }
+
+                self.info.lazy_imports.push(decl);
 
                 return VarDeclarator {
                     name: node.name.fold_with(self),
