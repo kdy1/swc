@@ -3,7 +3,6 @@ use crate::{
     bundler::{load_transformed::TransformedModule, scope::Scope},
     chunk::Chunk,
     debug::HygieneVisualizer,
-    util::IdentMarker,
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
@@ -33,19 +32,18 @@ impl Bundler {
             if let Some(imported) = self.scope.get_module(src.module_id) {
                 let dep = (*imported.module).clone();
                 let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
-                let dep = dep
-                    .fold_with(&mut Unexporter)
-                    .fold_with(&mut dce())
-                    .fold_with(&mut IdentMarker(imported.mark()));
+                let mut dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
+                // TODO: Handle renaming exports
 
                 if !ids.is_empty() {
-                    entry = entry.fold_with(&mut ImportMarker {
+                    let mut v = ImportMarker {
                         mark: imported.mark(),
                         ids: &ids,
-                    });
+                    };
+                    entry = entry.fold_with(&mut v);
+                    dep = dep.fold_with(&mut v);
                 }
 
-                // TODO: Handle renaming
                 buf.extend(dep.body);
             }
         }

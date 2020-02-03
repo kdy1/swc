@@ -8,12 +8,3 @@ impl Fold<Span> for HygieneRemover {
         s.with_ctxt(SyntaxContext::empty())
     }
 }
-
-pub struct IdentMarker(pub Mark);
-
-impl Fold<Ident> for IdentMarker {
-    fn fold(&mut self, mut node: Ident) -> Ident {
-        node.span = node.span.apply_mark(self.0);
-        node
-    }
-}
