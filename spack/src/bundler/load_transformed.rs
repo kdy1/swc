@@ -163,32 +163,25 @@ impl Bundler {
         let mut merged = MergedImports::default();
         let ImportInfo {
             imports,
-            requires,
-            partial_requires,
+            lazy_imports,
             dynamic_imports,
         } = info;
 
         let loaded = imports
             .into_par_iter()
             .map(|v| (v, false, true))
-            .chain(partial_requires.into_par_iter().map(|v| (v, false, false)))
-            .chain(
-                requires
-                    .into_par_iter()
-                    .map(|v| (v, false, false))
-                    .chain(dynamic_imports.into_par_iter().map(|v| (v, true, false)))
-                    .map(|(src, dynamic, unconditional)| {
-                        (
-                            ImportDecl {
-                                span: src.span,
-                                specifiers: vec![],
-                                src,
-                            },
-                            dynamic,
-                            unconditional,
-                        )
-                    }),
-            )
+            .chain(lazy_imports.into_par_iter().map(|v| (v, false, false)))
+            .chain(dynamic_imports.into_par_iter().map(|src| {
+                (
+                    ImportDecl {
+                        span: src.span,
+                        specifiers: vec![],
+                        src,
+                    },
+                    true,
+                    false,
+                )
+            }))
             .map(|(decl, dynamic, unconditional)| -> Result<_, Error> {
                 //
                 let res = self.load_transformed_inner(base, &decl.src.value)?;

@@ -27,10 +27,20 @@ impl Bundler {
 
 #[derive(Debug, Default)]
 pub(super) struct ImportInfo {
-    /// Unconditional imports
+    /// Unconditional imports. This includes require on top level.
     pub imports: Vec<ImportDecl>,
-    pub requires: Vec<Str>,
-    pub partial_requires: Vec<ImportDecl>,
+
+    /// Non-top-level imports.
+    ///
+    /// # Examaple
+    ///
+    /// ```js
+    /// try{
+    ///     const { watch } = require('watcher');
+    /// } catch (e) {
+    /// }
+    /// ```
+    pub lazy_imports: Vec<ImportDecl>,
     pub dynamic_imports: Vec<Str>,
 }
 
@@ -81,10 +91,21 @@ impl Fold<CallExpr> for ImportFinder {
 
         match node.callee {
             ExprOrSuper::Expr(box Expr::Ident(Ident {
+                span,
                 sym: js_word!("require"),
                 ..
             })) => {
-                self.info.requires.push(src.clone());
+                let decl = ImportDecl {
+                    span,
+                    specifiers: vec![],
+                    src: src.clone(),
+                };
+                if self.top_level {
+                    self.info.imports.push(decl)
+                } else {
+                    self.info.lazy_imports.push(decl);
+                }
+
                 return node;
             }
 
@@ -135,7 +156,7 @@ impl Fold<VarDeclarator> for ImportFinder {
 
                 let ids: Vec<Ident> = find_ids(&node.name);
 
-                self.info.partial_requires.push(ImportDecl {
+                let decl = ImportDecl {
                     span,
                     specifiers: ids
                         .into_iter()
@@ -148,7 +169,13 @@ impl Fold<VarDeclarator> for ImportFinder {
                         })
                         .collect(),
                     src,
-                });
+                };
+
+                if self.top_level {
+                    self.info.imports.push(decl);
+                } else {
+                    self.info.lazy_imports.push(decl);
+                }
 
                 return VarDeclarator {
                     name: node.name.fold_with(self),
