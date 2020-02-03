@@ -1,6 +1,7 @@
 use super::Bundler;
 use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
 use anyhow::{Context, Error};
+use is_macro::Is;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
@@ -36,7 +37,7 @@ pub(super) struct MergedImports {
 }
 
 /// Clone is relatively cheap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Is)]
 pub(super) enum Specifier {
     Specific { local: Id, orig: Option<Id> },
     Namespace { local: Id },

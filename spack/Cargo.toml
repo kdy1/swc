@@ -26,6 +26,7 @@ log = "0.4.8"
 node-resolve = "2.2.0"
 petgraph = "0.5"
 fxhash = "0.2.1"
+is-macro = "0.1.8"
 
 [dev-dependencies]
 testing = { path = "../testing" }

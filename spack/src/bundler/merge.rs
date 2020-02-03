@@ -23,6 +23,10 @@ impl Bundler {
     ) -> Result<Module, Error> {
         let mut buf = vec![];
         for (src, specifiers) in &info.merged_imports.specifiers {
+            if specifiers.iter().any(|v| v.is_namespace()) {
+                unimplemented!("namespace dependency: {} -> {}", info.id, src.module_id)
+            }
+
             if src.is_unconditional {
                 if let Some(imported) = self.scope.get_module(src.module_id) {
                     let dep = (*imported.module).clone();
