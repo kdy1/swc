@@ -1,4 +1,5 @@
 use crate::paths;
+use pretty_assertions::assert_eq;
 use std::{
     fmt,
     fs::{create_dir_all, remove_file, File},
@@ -86,7 +87,7 @@ impl NormalizedOutput {
             actual: self.clone(),
         };
         if ::std::env::var("CI").unwrap_or(String::from("0")) == "1" {
-            println!("Diff:\n{:?}", diff);
+            assert_eq!(diff.expected, diff.actual);
             return Err(diff);
         }
 
