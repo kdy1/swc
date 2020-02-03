@@ -1,7 +1,8 @@
 use crate::{Bundler, Id};
 use std::sync::Arc;
 use swc_common::{
-    util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned,
+    util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
+    VisitWith,
 };
 use swc_ecma_ast::*;
 use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
@@ -167,8 +168,21 @@ impl Fold<ExportDecl> for UsageTracker {
             Decl::Var(ref mut v) => {
                 // TODO: Export only when it's required. (i.e. check self.used_exports)
 
-                node.span = node.span.apply_mark(self.mark);
-                node.decl = self.fold_in_marking_phase(node.decl);
+                v.decls.retain(|d| {
+                    let mut v = IdentListVisitor {
+                        ids: &self.included,
+                        found: false,
+                    };
+
+                    d.visit_with(&mut v);
+
+                    v.found
+                });
+
+                if !v.decls.is_empty() {
+                    node.span = node.span.apply_mark(self.mark);
+                    node.decl = self.fold_in_marking_phase(node.decl);
+                }
                 return node;
             }
         };
@@ -346,3 +360,20 @@ macro_rules! simple {
 simple!(Stmt);
 simple!(ModuleItem);
 simple!(ModuleDecl);
+
+struct IdentListVisitor<'a> {
+    ids: &'a [Id],
+    found: bool,
+}
+
+impl Visit<Ident> for IdentListVisitor<'_> {
+    fn visit(&mut self, node: &Ident) {
+        if self.found {
+            return;
+        }
+
+        if self.ids.iter().any(|i| i == node) {
+            self.found = true
+        }
+    }
+}
