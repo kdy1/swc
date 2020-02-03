@@ -26,12 +26,6 @@ impl Bundler {
         for (src, ids) in &info.merged_imports.ids {
             //
             if let Some(imported) = self.scope.get_module(src.module_id) {
-                let code = self
-                    .swc
-                    .print(&*imported.module, imported.fm.clone(), false, false)?;
-
-                println!("Merging\n{}", code.code);
-
                 let dep: Module = self.drop_unused(
                     imported.fm.clone(),
                     (*imported.module).clone(),
