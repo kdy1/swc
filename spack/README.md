@@ -1,10 +1,15 @@
 # TODOs
- - [ ] Namespace import
+ - [ ] import
+   - [x] normal
+   - [ ] aliased
+   - [ ] namespaced
  - [ ] Chunking
  - [ ] Correct execution order
+   - [x] import statements
+   - [ ] require
+   - [ ] dynamic imports
  - [ ] Dynamic imports
    - [x] Loading
- - [ ] Alias handling
  - [ ] Export filtering (in usage_analysis)
 
   
