@@ -20,6 +20,7 @@ impl Bundler {
             pass_cnt: 0,
             mark: self.used_mark,
             included: Default::default(),
+            changed: false,
             used_exports,
             marking_phase: false,
         };
@@ -38,6 +39,7 @@ pub(super) struct UsageTracker {
 
     /// Identifiers which should be emitted.
     included: Vec<Id>,
+    changed: bool,
 
     used_exports: Option<Vec<Id>>,
 
@@ -54,12 +56,11 @@ where
         let parent_cnt = self.pass_cnt;
         //        let upper_changed = replace(&mut self.changed, Default::default());
 
-        let mut len;
         loop {
             self.pass_cnt += 1;
-            len = self.included.len();
+            self.changed = false;
             items = items.fold_children(self);
-            if len == self.included.len() {
+            if !self.changed {
                 break;
             }
         }
@@ -301,13 +302,14 @@ impl Fold<Ident> for UsageTracker {
         }
 
         if self.marking_phase {
-            log::debug!(
+            println!(
                 "UsageTracker:{}\nMarking {}{:?} as used",
                 self.path,
                 i.sym,
                 i.span.ctxt()
             );
             self.included.push((&i).into());
+            self.changed = true;
         }
 
         i
@@ -345,6 +347,10 @@ impl Fold<VarDecl> for UsageTracker {
 
 impl Fold<MemberExpr> for UsageTracker {
     fn fold(&mut self, mut e: MemberExpr) -> MemberExpr {
+        if self.is_marked(e.span()) {
+            return e;
+        }
+
         e.obj = e.obj.fold_with(self);
         if e.computed {
             e.prop = e.prop.fold_with(self);
