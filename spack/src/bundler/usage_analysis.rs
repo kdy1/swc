@@ -1,7 +1,4 @@
-use crate::{
-    bundler::load_transformed::TransformedModule, debug::HygieneVisualizer, util::HygieneRemover,
-    Bundler, Id,
-};
+use crate::{util::HygieneRemover, Bundler, Id};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,

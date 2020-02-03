@@ -1,5 +1,4 @@
-use swc_common::{Fold, Mark, Span, SyntaxContext};
-use swc_ecma_ast::Ident;
+use swc_common::{Fold, Span, SyntaxContext};
 
 pub struct HygieneRemover;
 

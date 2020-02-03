@@ -1,13 +1,7 @@
-use crate::{
-    bundler::load_transformed::{MergedImports, TransformedModule},
-    id::ModuleIdGenerator,
-    ModuleId,
-};
+use crate::{bundler::load_transformed::TransformedModule, id::ModuleIdGenerator, ModuleId};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use std::{path::PathBuf, sync::Arc};
-use swc_common::{Mark, SourceFile};
-use swc_ecma_ast::Module;
 
 #[derive(Debug, Default)]
 pub(super) struct Scope {
@@ -21,7 +15,7 @@ impl Scope {
     /// Stores module information. The information should contain only
     /// information gotten from module itself. In other words, it should not
     /// contains information from a dependency.
-    pub fn store_module(&self, path: Arc<PathBuf>, info: TransformedModule) {
+    pub fn store_module(&self, _path: Arc<PathBuf>, info: TransformedModule) {
         self.modules.insert(info.id, info);
     }
 

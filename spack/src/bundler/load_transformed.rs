@@ -1,13 +1,12 @@
 use super::Bundler;
-use crate::{bundler::import_analysis::ImportInfo, debug::HygieneVisualizer, Id, ModuleId};
+use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
 use anyhow::{Context, Error};
-use fxhash::FxHashMap;
 use rayon::prelude::*;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{fold::FoldWith, FileName, Mark, SourceFile};
+use swc_common::{FileName, Mark, SourceFile};
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
 /// Module after applying transformations.
@@ -102,7 +101,7 @@ impl Bundler {
     ) -> Result<TransformedModule, Error> {
         log::trace!("transform_module({})", fm.name);
 
-        let mut imports = self.extract_import_info(&mut module);
+        let imports = self.extract_import_info(&mut module);
 
         let (module, imports) = rayon::join(
             || -> Result<_, Error> {

@@ -3,7 +3,7 @@ use anyhow::Error;
 use std::{path::Path, sync::Arc};
 use swc_common::SourceFile;
 use swc_ecma_ast::{Module, Program};
-use swc_ecma_parser::{JscTarget, Syntax};
+use swc_ecma_parser::JscTarget;
 
 /// JavaScript loader
 pub struct JsLoader {

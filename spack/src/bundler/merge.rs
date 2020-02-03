@@ -1,18 +1,10 @@
 use super::Bundler;
-use crate::{
-    bundler::{load_transformed::TransformedModule, scope::Scope},
-    chunk::Chunk,
-    debug::HygieneVisualizer,
-    Id, ModuleId,
-};
-use anyhow::{Context, Error};
-use swc_common::{errors::Handler, fold::FoldWith, util::move_map::MoveMap, Fold, Mark, DUMMY_SP};
+use crate::{bundler::load_transformed::TransformedModule, chunk::Chunk, Id};
+use anyhow::Error;
+use swc_common::{fold::FoldWith, Fold, Mark, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_transforms::{
-    hygiene,
-    optimization::{dce, simplifier},
-};
-use swc_ecma_utils::{prepend_stmts, StmtLike};
+use swc_ecma_transforms::{hygiene, optimization::dce};
+use swc_ecma_utils::prepend_stmts;
 
 #[derive(Debug)]
 pub(crate) enum MergedModule {
