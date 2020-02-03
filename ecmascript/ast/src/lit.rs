@@ -36,6 +36,7 @@ pub struct BigInt {
 }
 
 #[ast_node("StringLiteral")]
+#[derive(Eq, Hash)]
 pub struct Str {
     pub span: Span,
 
