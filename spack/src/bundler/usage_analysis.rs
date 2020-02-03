@@ -68,7 +68,7 @@ where
         items = items.move_flat_map(|item| {
             if !self.is_marked(item.span()) {
                 if cfg!(debug_assertions) {
-                    println!("{}\n{:?}\nDropping {:?}", self.path, self.included, item);
+                    log::info!("{}\n{:?}\nDropping {:?}", self.path, self.included, item);
                 }
 
                 return None;
@@ -181,11 +181,6 @@ impl Fold<ExportDecl> for UsageTracker {
                 .iter()
                 .any(|exported| exported == i)
         {
-            println!(
-                "====================\n{}\n{:?}\n\tMatched: {:?}",
-                self.path, self.used_exports, i
-            );
-
             node.span = node.span.apply_mark(self.mark);
             node.decl = self.fold_in_marking_phase(node.decl);
         }
@@ -281,7 +276,7 @@ impl Fold<Ident> for UsageTracker {
         }
 
         if self.marking_phase {
-            println!(
+            log::debug!(
                 "UsageTracker:{}\nMarking {}{:?} as used",
                 self.path,
                 i.sym,
