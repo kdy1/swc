@@ -3,8 +3,9 @@ use crate::{bundler::load_transformed::TransformedModule, load::Load, resolve::R
 use anyhow::{Context, Error};
 use rayon::prelude::*;
 use std::{path::PathBuf, sync::Arc};
-use swc_common::{Mark, SourceFile};
+use swc_common::{fold::FoldWith, Mark, SourceFile};
 use swc_ecma_ast::Module;
+use swc_ecma_transforms::fixer;
 
 mod export;
 mod import_analysis;
@@ -98,6 +99,8 @@ impl Bundler {
                 let module = self
                     .merge_modules((*m.module).clone(), &m)
                     .context("failed to merge module")?;
+
+                let module = module.fold_with(&mut fixer());
 
                 (m.fm, module)
             };
