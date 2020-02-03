@@ -100,13 +100,17 @@ impl Bundler {
             || -> Result<_, Error> {
                 self.swc.run(|| {
                     // Process module
-                    let config = self.swc.config_for_file(&self.swc_options, &*fm)?;
+                    let config = self
+                        .swc
+                        .config_for_file(&self.swc_options, &*fm)
+                        .context("failed to parse .swcrc")?;
 
                     let program = self.swc.transform(
                         Program::Module(module),
                         config.external_helpers,
                         config.pass,
                     );
+
                     match program {
                         Program::Module(module) => Ok(module),
                         _ => unreachable!(),

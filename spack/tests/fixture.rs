@@ -109,7 +109,10 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                 let bundler = Bundler::new(
                     env::current_dir().unwrap(),
                     compiler.clone(),
-                    Default::default(),
+                    swc::config::Options {
+                        swcrc: true,
+                        ..Default::default()
+                    },
                     box spack::resolve::NodeResolver,
                     box JsLoader::new(compiler, Default::default()),
                 );
