@@ -1,1 +1,1 @@
-console.log(require("./a"), "foo");
+console.log((require("./a"), "foo"));
