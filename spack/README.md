@@ -1,6 +1,23 @@
+# TODOs
+ - [ ] Namespace import
+ - [ ] Chunking
+ - [ ] Correct execution order
+ - [ ] Dynamic imports
+   - [x] Loading
+ - [ ] Alias handling
+ - [ ] Export filtering (in usage_analysis)
+
+  
+## TODOs (postponed)
+ - [ ] Full require handling
+   - [x] Loading
+   - [ ] Optional dependency
+   
+ - [ ] Optional dependency
+
 # Ideas
 
-We need a way to make reference to module unique
+
 
 
 ## Avoiding requires
@@ -8,24 +25,7 @@ We need a way to make reference to module unique
 We can merge all modules without side effects into a single file without hard work.
 Identifier hygiene from `swc_ecma_transforms` should fit the use case.
 
-```dot
-digraph G {
 
-  Alias[label = "import_analysis: Alias"];
-  Filtering[label="usage_analysis: Filtering"];
-  
-  DynamicImport;
-  Chunk;
-  
-  OptionalDependency;
-  ExecutionOrder;
-  
-  Filtering -> Alias;
-  DynamicImport -> Chunk;
-  DynamicImport -> ExecutionOrder;
-  OptionalDependency -> Chunk;
-}
-```
 
 ## Maybe 
 
