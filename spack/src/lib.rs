@@ -15,6 +15,7 @@ mod id;
 pub mod load;
 pub mod loaders;
 pub mod resolve;
+mod util;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {

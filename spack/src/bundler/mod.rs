@@ -20,6 +20,7 @@ pub struct Bundler {
     /// Javascript compiler.
     swc: Arc<swc::Compiler>,
     swc_options: swc::config::Options,
+    used_mark: Mark,
 
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
@@ -35,6 +36,8 @@ impl Bundler {
         resolver: Box<dyn Resolve + Sync>,
         loader: Box<dyn Load + Sync>,
     ) -> Self {
+        let used_mark = swc.run(|| Mark::fresh(Mark::root()));
+
         Bundler {
             working_dir,
             config: Config { tree_shake: true },
@@ -43,6 +46,7 @@ impl Bundler {
             loader,
             resolver,
             scope: Default::default(),
+            used_mark,
         }
     }
 

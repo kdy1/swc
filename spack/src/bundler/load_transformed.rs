@@ -1,5 +1,5 @@
 use super::Bundler;
-use crate::{bundler::import_analysis::ImportInfo, Id, ModuleId};
+use crate::{bundler::import_analysis::ImportInfo, debug::HygieneVisualizer, Id, ModuleId};
 use anyhow::{Context, Error};
 use fxhash::FxHashMap;
 use rayon::prelude::*;
@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{FileName, Mark, SourceFile};
+use swc_common::{fold::FoldWith, FileName, Mark, SourceFile};
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
 /// Module after applying transformations.
@@ -73,40 +73,25 @@ impl Bundler {
             return Ok((path, cached.clone()));
         }
 
-        let (id, fm, module, mark) = self.load(&path).context("Bundler.load failed")?;
+        let (id, fm, module) = self.load(&path).context("Bundler.load failed")?;
 
         let v = self
-            .transform_module(id, fm.clone(), module, mark)
+            .transform_module(id, fm.clone(), module)
             .context("failed to transform module")?;
 
         self.scope.store_module(path.clone(), v.clone());
 
-        {
-            let code = self
-                .swc
-                .print(&*v.module, v.fm.clone(), false, false)
-                .unwrap()
-                .code;
-
-            println!("Loaded and transformed module\n{}\n\n\n", code);
-        }
-
         Ok((path, v))
     }
 
-    fn load(
-        &self,
-        path: &Arc<PathBuf>,
-    ) -> Result<(ModuleId, Arc<SourceFile>, Module, Mark), Error> {
+    fn load(&self, path: &Arc<PathBuf>) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
         let module_id = self.scope.module_id_gen.gen(path);
-        let mark = self.swc.run(|| Mark::fresh(Mark::root()));
 
         let path = Arc::new(path);
 
         let (fm, module) = self.loader.load(&path).context("Loader.load failed")?;
-        let module = self.drop_unused(fm.clone(), module, mark, None);
 
-        Ok((module_id, fm, module, mark))
+        Ok((module_id, fm, module))
     }
 
     fn transform_module(
@@ -114,7 +99,6 @@ impl Bundler {
         id: ModuleId,
         fm: Arc<SourceFile>,
         mut module: Module,
-        mark: Mark,
     ) -> Result<TransformedModule, Error> {
         log::trace!("transform_module({})", fm.name);
 
@@ -157,7 +141,11 @@ impl Bundler {
         );
 
         let imports = imports?;
-        let module = Arc::new(module?);
+        let module = module?;
+        let module = self.drop_unused(fm.clone(), module, None);
+
+        let module = Arc::new(module);
+        let mark = self.swc.run(|| Mark::fresh(Mark::root()));
 
         Ok(TransformedModule {
             id,

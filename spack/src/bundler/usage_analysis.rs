@@ -1,4 +1,7 @@
-use crate::{bundler::load_transformed::TransformedModule, Bundler, Id};
+use crate::{
+    bundler::load_transformed::TransformedModule, debug::HygieneVisualizer, util::HygieneRemover,
+    Bundler, Id,
+};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
@@ -13,20 +16,21 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
-        mark: Mark,
         used_exports: Option<Vec<Id>>,
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
             pass_cnt: 0,
-            mark,
+            mark: self.used_mark,
             included: Default::default(),
             changed: false,
             used_exports,
             marking_phase: false,
         };
 
-        let node = self.swc.run(|| node.fold_with(&mut v));
+        let node = self
+            .swc
+            .run(|| node.fold_with(&mut v).fold_with(&mut HygieneRemover));
 
         node
     }
@@ -100,7 +104,7 @@ where
 
 impl UsageTracker {
     pub fn is_marked(&self, span: Span) -> bool {
-        let mut ctxt = span.ctxt();
+        let mut ctxt = span.ctxt().clone();
 
         loop {
             let mark = ctxt.remove_mark();
