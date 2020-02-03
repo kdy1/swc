@@ -87,7 +87,7 @@ impl NormalizedOutput {
             actual: self.clone(),
         };
         if ::std::env::var("CI").unwrap_or(String::from("0")) == "1" {
-            assert_eq!(diff.expected, diff.actual);
+            assert_eq!(diff.expected, diff.actual, "Actual:\n{}", diff.actual);
             return Err(diff);
         }
 
