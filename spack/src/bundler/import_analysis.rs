@@ -113,13 +113,14 @@ impl Fold<Expr> for ImportFinder {
                             specifiers: vec![],
                             src: src.clone(),
                         };
-                        if self.top_level {
-                            self.info.imports.push(decl);
-                            return *undefined(span);
-                        } else {
-                            self.info.lazy_imports.push(decl);
-                            return Expr::Call(e);
-                        }
+
+                        // if self.top_level {
+                        //     self.info.imports.push(decl);
+                        //     return *undefined(span);
+                        // }
+
+                        self.info.lazy_imports.push(decl);
+                        return Expr::Call(e);
                     }
 
                     ExprOrSuper::Expr(box Expr::Ident(Ident {
@@ -189,12 +190,12 @@ impl Fold<VarDeclarator> for ImportFinder {
                     src,
                 };
 
-                if self.top_level {
-                    self.info.imports.push(decl);
-                    node.init = None;
-                    node.name = Pat::Invalid(Invalid { span: DUMMY_SP });
-                    return node;
-                }
+                // if self.top_level {
+                //     self.info.imports.push(decl);
+                //     node.init = None;
+                //     node.name = Pat::Invalid(Invalid { span: DUMMY_SP });
+                //     return node;
+                // }
 
                 self.info.lazy_imports.push(decl);
 
