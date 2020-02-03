@@ -8,7 +8,7 @@ use swc_ecma_ast::Module;
 use swc_ecma_transforms::fixer;
 
 mod export;
-mod import_analysis;
+mod import;
 mod load_transformed;
 mod merge;
 mod scope;

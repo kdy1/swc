@@ -1,6 +1,6 @@
 use super::Bundler;
 use crate::{
-    bundler::{export::ExportInfo, import_analysis::ImportInfo},
+    bundler::{export::ExportInfo, import::ImportInfo},
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
