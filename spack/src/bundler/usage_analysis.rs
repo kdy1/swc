@@ -67,6 +67,14 @@ where
         log::debug!("UsageTracker: Ran {} times", self.pass_cnt);
 
         items = items.move_flat_map(|item| {
+            let item = match item.try_into_stmt() {
+                Ok(stmt) => match stmt {
+                    Stmt::Empty(..) => return None,
+                    _ => T::from_stmt(stmt),
+                },
+                Err(item) => item,
+            };
+
             if !self.is_marked(item.span()) {
                 if cfg!(debug_assertions) {
                     log::info!("{}\n{:?}\nDropping {:?}", self.path, self.included, item);
