@@ -1,4 +1,5 @@
-export function a() {}
-export function b() {}
-
+function a() {
+}
+function b() {
+}
 console.log(a, b);
