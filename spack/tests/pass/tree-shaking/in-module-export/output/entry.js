@@ -1,2 +1,2 @@
-var b = 1;
-export var foo = b;
+const b = 1;
+export const foo = b;
