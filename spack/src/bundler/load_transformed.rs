@@ -72,6 +72,16 @@ impl Bundler {
 
         self.scope.store_module(path.clone(), v.clone());
 
+        {
+            let code = self
+                .swc
+                .print(&*v.module, v.fm.clone(), false, false)
+                .unwrap()
+                .code;
+
+            println!("Loaded and transformed module\n{}\n\n\n", code);
+        }
+
         Ok((path, v))
     }
 
