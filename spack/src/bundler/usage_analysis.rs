@@ -43,8 +43,6 @@ pub(super) struct UsageTracker {
     mark: Mark,
 
     /// Identifiers which should be emitted.
-    ///
-    /// TODO: use FxHashSet for performance
     included: Vec<Id>,
     changed: bool,
 
@@ -184,8 +182,6 @@ impl Fold<ExportDecl> for UsageTracker {
 
             // Preserve only exported variables
             Decl::Var(ref mut v) => {
-                // TODO: Export only when it's required. (i.e. check self.used_exports)
-
                 if let Some(ref exported_ids) = self.used_exports {
                     v.decls.retain(|d| {
                         let mut v = IdentListVisitor {
