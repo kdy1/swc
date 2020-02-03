@@ -1,9 +1,9 @@
 use super::Bundler;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{util::move_map::MoveMap, Fold, FoldWith, DUMMY_SP};
+use swc_common::{util::move_map::MoveMap, Fold, FoldWith};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{find_ids, undefined};
+use swc_ecma_utils::find_ids;
 
 impl Bundler {
     /// This methods removes import statements (statements like `import a as b
@@ -153,7 +153,7 @@ impl Fold<Expr> for ImportFinder {
 /// import { readFile } from 'fs';
 /// ```
 impl Fold<VarDeclarator> for ImportFinder {
-    fn fold(&mut self, mut node: VarDeclarator) -> VarDeclarator {
+    fn fold(&mut self, node: VarDeclarator) -> VarDeclarator {
         match node.init {
             Some(box Expr::Call(CallExpr {
                 span,
