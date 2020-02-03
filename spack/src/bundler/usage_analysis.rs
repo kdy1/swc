@@ -60,7 +60,7 @@ where
         //        let upper_changed = replace(&mut self.changed, Default::default());
 
         loop {
-            println!("UsageTracker running: {}", self.pass_cnt);
+            log::trace!("UsageTracker running: {}", self.pass_cnt);
 
             self.pass_cnt += 1;
             self.changed = false;
@@ -304,7 +304,7 @@ impl Fold<Ident> for UsageTracker {
         }
 
         if self.marking_phase {
-            println!(
+            log::debug!(
                 "UsageTracker:{}\nMarking {}{:?} as used",
                 self.path,
                 i.sym,
@@ -364,8 +364,6 @@ impl Fold<MemberExpr> for UsageTracker {
 
 impl Fold<FnDecl> for UsageTracker {
     fn fold(&mut self, mut f: FnDecl) -> FnDecl {
-        println!("\tFold<FnDecl>: {:?}", self.marking_phase);
-
         if self.is_marked(f.span()) {
             return f;
         }
