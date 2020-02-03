@@ -14,6 +14,7 @@ mod debug;
 mod id;
 pub mod load;
 pub mod loaders;
+mod normalize;
 pub mod resolve;
 mod util;
 

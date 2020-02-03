@@ -8,6 +8,24 @@ We need a way to make reference to module unique
 We can merge all modules without side effects into a single file without hard work.
 Identifier hygiene from `swc_ecma_transforms` should fit the use case.
 
+```dot
+digraph G {
+
+  Alias[label = "import_analysis: Alias"];
+  Filtering[label="usage_analysis: Filtering"];
+  
+  DynamicImport;
+  Chunk;
+  
+  OptionalDependency;
+  ExecutionOrder;
+  
+  Filtering -> Alias;
+  DynamicImport -> Chunk;
+  DynamicImport -> ExecutionOrder;
+  OptionalDependency -> Chunk;
+}
+```
 
 ## Maybe 
 
