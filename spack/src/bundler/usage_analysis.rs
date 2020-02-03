@@ -281,13 +281,10 @@ impl Fold<ExprStmt> for UsageTracker {
         if node.expr.may_have_side_effects() {
             log::trace!("UsageTracker: ExprStmt: Entering marking phase");
 
-            let old = self.marking_phase;
-            self.marking_phase = true;
             let stmt = ExprStmt {
                 span: node.span.apply_mark(self.mark),
-                expr: node.expr.fold_children(self),
+                expr: self.fold_in_marking_phase(node.expr),
             };
-            self.marking_phase = old;
             return stmt;
         }
 
