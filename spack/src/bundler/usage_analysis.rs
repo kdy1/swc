@@ -176,16 +176,19 @@ impl Fold<ExportDecl> for UsageTracker {
             Decl::Var(ref mut v) => {
                 // TODO: Export only when it's required. (i.e. check self.used_exports)
 
-                v.decls.retain(|d| {
-                    let mut v = IdentListVisitor {
-                        ids: &self.included,
-                        found: false,
-                    };
+                if let Some(ref exported_ids) = self.used_exports {
+                    v.decls.retain(|d| {
+                        let mut v = IdentListVisitor {
+                            included_ids: &self.included,
+                            exported_ids: &exported_ids,
+                            found: false,
+                        };
 
-                    d.visit_with(&mut v);
+                        d.visit_with(&mut v);
 
-                    v.found
-                });
+                        v.found
+                    });
+                }
 
                 if !v.decls.is_empty() {
                     node.span = node.span.apply_mark(self.mark);
@@ -369,8 +372,10 @@ simple!(Stmt);
 simple!(ModuleItem);
 simple!(ModuleDecl);
 
+#[derive(Debug)]
 struct IdentListVisitor<'a> {
-    ids: &'a [Id],
+    included_ids: &'a [Id],
+    exported_ids: &'a [Id],
     found: bool,
 }
 
@@ -380,8 +385,14 @@ impl Visit<Ident> for IdentListVisitor<'_> {
             return;
         }
 
-        if self.ids.iter().any(|i| i == node) {
-            self.found = true
+        if self
+            .included_ids
+            .iter()
+            .chain(self.exported_ids)
+            .any(|i| i == node)
+        {
+            self.found = true;
+            return;
         }
     }
 }
