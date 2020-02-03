@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use swc_common::{FileName, SourceFile};
+use swc_common::{FileName, Mark, SourceFile};
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
 /// Module after applying transformations.
@@ -18,6 +18,15 @@ pub(super) struct TransformedModule {
     pub module: Arc<Module>,
     pub merged_imports: Arc<MergedImports>,
     pub is_dynamic: bool,
+
+    mark: Mark,
+}
+
+impl TransformedModule {
+    /// Marks applied to bindings
+    pub fn mark(&self) -> Mark {
+        self.mark
+    }
 }
 
 #[derive(Debug, Default)]
@@ -64,10 +73,10 @@ impl Bundler {
             return Ok((path, cached.clone()));
         }
 
-        let (id, fm, module) = self.load(&path).context("Bundler.load failed")?;
+        let (id, fm, module, mark) = self.load(&path).context("Bundler.load failed")?;
 
         let v = self
-            .transform_module(id, fm.clone(), module)
+            .transform_module(id, fm.clone(), module, mark)
             .context("failed to transform module")?;
 
         self.scope.store_module(path.clone(), v.clone());
@@ -85,15 +94,19 @@ impl Bundler {
         Ok((path, v))
     }
 
-    fn load(&self, path: &Arc<PathBuf>) -> Result<(ModuleId, Arc<SourceFile>, Module), Error> {
+    fn load(
+        &self,
+        path: &Arc<PathBuf>,
+    ) -> Result<(ModuleId, Arc<SourceFile>, Module, Mark), Error> {
         let module_id = self.scope.module_id_gen.gen(path);
+        let mark = self.swc.run(|| Mark::fresh(Mark::root()));
 
         let path = Arc::new(path);
 
         let (fm, module) = self.loader.load(&path).context("Loader.load failed")?;
-        let module = self.drop_unused(fm.clone(), module, None);
+        let module = self.drop_unused(fm.clone(), module, mark, None);
 
-        Ok((module_id, fm, module))
+        Ok((module_id, fm, module, mark))
     }
 
     fn transform_module(
@@ -101,6 +114,7 @@ impl Bundler {
         id: ModuleId,
         fm: Arc<SourceFile>,
         mut module: Module,
+        mark: Mark,
     ) -> Result<TransformedModule, Error> {
         log::trace!("transform_module({})", fm.name);
 
@@ -151,6 +165,7 @@ impl Bundler {
             module,
             merged_imports: Arc::new(imports),
             is_dynamic: false,
+            mark,
         })
     }
 

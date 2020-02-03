@@ -15,9 +15,6 @@ pub(super) struct Scope {
 
     /// Phase 1 cache
     modules: DashMap<ModuleId, TransformedModule, FxBuildHasher>,
-
-    /// Marks applied to bindings
-    pub module_marks: DashMap<ModuleId, Mark, FxBuildHasher>,
 }
 
 impl Scope {

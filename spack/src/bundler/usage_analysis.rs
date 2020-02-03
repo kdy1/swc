@@ -1,4 +1,4 @@
-use crate::{Bundler, Id};
+use crate::{bundler::load_transformed::TransformedModule, Bundler, Id};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
@@ -13,12 +13,13 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
+        mark: Mark,
         used_exports: Option<Vec<Id>>,
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
             pass_cnt: 0,
-            mark: self.used_mark,
+            mark,
             included: Default::default(),
             changed: false,
             used_exports,

@@ -24,9 +24,6 @@ pub struct Bundler {
     resolver: Box<dyn Resolve + Sync>,
     loader: Box<dyn Load + Sync>,
 
-    /// Mark for used statements
-    used_mark: Mark,
-
     scope: Scope,
 }
 
@@ -38,7 +35,6 @@ impl Bundler {
         resolver: Box<dyn Resolve + Sync>,
         loader: Box<dyn Load + Sync>,
     ) -> Self {
-        let used_mark = swc.run(|| Mark::fresh(Mark::root()));
         Bundler {
             working_dir,
             config: Config { tree_shake: true },
@@ -47,7 +43,6 @@ impl Bundler {
             loader,
             resolver,
             scope: Default::default(),
-            used_mark,
         }
     }
 
