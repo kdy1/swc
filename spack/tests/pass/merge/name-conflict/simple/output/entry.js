@@ -1,5 +1,5 @@
-const a = foo1();
-function foo1() {
+const a = foo();
+function foo() {
 }
 const b = foo();
 function foo() {
