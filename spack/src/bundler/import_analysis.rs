@@ -14,7 +14,10 @@ impl Bundler {
     pub(super) fn extract_import_info(&self, module: &mut Module) -> ImportInfo {
         let body = replace(&mut module.body, vec![]);
 
-        let mut v = ImportFinder::default();
+        let mut v = ImportFinder {
+            top_level: false,
+            info: Default::default(),
+        };
         let body = body.fold_with(&mut v);
         module.body = body;
 
@@ -24,19 +27,21 @@ impl Bundler {
 
 #[derive(Debug, Default)]
 pub(super) struct ImportInfo {
+    /// Unconditional imports
     pub imports: Vec<ImportDecl>,
     pub requires: Vec<Str>,
     pub partial_requires: Vec<ImportDecl>,
     pub dynamic_imports: Vec<Str>,
 }
 
-#[derive(Default)]
 struct ImportFinder {
+    top_level: bool,
     info: ImportInfo,
 }
 
 impl Fold<Vec<ModuleItem>> for ImportFinder {
     fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
+        self.top_level = true;
         items.move_flat_map(|item| {
             //
 
@@ -51,6 +56,13 @@ impl Fold<Vec<ModuleItem>> for ImportFinder {
                 _ => Some(item.fold_with(self)),
             }
         })
+    }
+}
+
+impl Fold<Vec<Stmt>> for ImportFinder {
+    fn fold(&mut self, items: Vec<Stmt>) -> Vec<Stmt> {
+        self.top_level = false;
+        items.fold_children(self)
     }
 }
 
