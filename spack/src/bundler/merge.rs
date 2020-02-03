@@ -1,5 +1,8 @@
 use super::Bundler;
-use crate::{bundler::load_transformed::TransformedModule, chunk::Chunk, Id};
+use crate::{
+    bundler::load_transformed::{Specifier, TransformedModule},
+    chunk::Chunk,
+};
 use anyhow::Error;
 use swc_common::{fold::FoldWith, Fold, Mark, DUMMY_SP};
 use swc_ecma_ast::*;
@@ -19,18 +22,19 @@ impl Bundler {
         info: &TransformedModule,
     ) -> Result<Module, Error> {
         let mut buf = vec![];
-        for (src, ids) in &info.merged_imports.ids {
+        for (src, specifiers) in &info.merged_imports.specifiers {
             if src.is_unconditional {
                 if let Some(imported) = self.scope.get_module(src.module_id) {
                     let dep = (*imported.module).clone();
-                    let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
+                    let dep: Module =
+                        self.drop_unused(imported.fm.clone(), dep, Some((*specifiers).clone()));
                     let mut dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
                     // TODO: Handle renaming exports
 
-                    if !ids.is_empty() {
+                    if !specifiers.is_empty() {
                         let mut v = ImportMarker {
                             mark: imported.mark(),
-                            ids: &ids,
+                            specifiers: &specifiers,
                         };
                         entry = entry.fold_with(&mut v);
                         dep = dep.fold_with(&mut v);
@@ -71,12 +75,12 @@ impl Fold<ModuleItem> for Unexporter {
 
 struct ImportMarker<'a> {
     mark: Mark,
-    ids: &'a [Id],
+    specifiers: &'a [Specifier],
 }
 
 impl Fold<Ident> for ImportMarker<'_> {
     fn fold(&mut self, mut node: Ident) -> Ident {
-        if self.ids.iter().any(|id| *id == node) {
+        if self.specifiers.iter().any(|id| *id.local() == node) {
             node.span = node.span.apply_mark(self.mark);
         }
 

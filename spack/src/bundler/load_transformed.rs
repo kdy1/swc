@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use swc_atoms::js_word;
 use swc_common::{FileName, Mark, SourceFile};
 use swc_ecma_ast::{ImportDecl, ImportSpecifier, Module, Program, Str};
 
@@ -31,7 +32,23 @@ impl TransformedModule {
 #[derive(Debug, Default)]
 pub(super) struct MergedImports {
     /// If imported ids are empty, it is a side-effect import.
-    pub ids: Vec<(Source, Vec<Id>)>,
+    pub specifiers: Vec<(Source, Vec<Specifier>)>,
+}
+
+/// Clone is relatively cheap
+#[derive(Debug, Clone)]
+pub(super) enum Specifier {
+    Specific { local: Id, orig: Option<Id> },
+    Namespace { local: Id },
+}
+
+impl Specifier {
+    pub fn local(&self) -> &Id {
+        match self {
+            Specifier::Specific { local, .. } => local,
+            Specifier::Namespace { local, .. } => local,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -206,20 +223,26 @@ impl Bundler {
                 }
 
                 // TODO: Handle rename
-                let mut ids = vec![];
+                let mut specifiers = vec![];
                 for s in decl.specifiers {
                     match s {
-                        ImportSpecifier::Specific(s) => ids.push(s.local.into()),
-                        ImportSpecifier::Default(s) => {
-                            ids.push(s.local.into());
-                        }
+                        ImportSpecifier::Specific(s) => specifiers.push(Specifier::Specific {
+                            local: s.local.into(),
+                            orig: s.imported.map(From::from),
+                        }),
+                        ImportSpecifier::Default(s) => specifiers.push(Specifier::Specific {
+                            local: s.local.into(),
+                            orig: Some(Id::new(js_word!("default"), s.span.ctxt())),
+                        }),
                         ImportSpecifier::Namespace(s) => {
-                            ids.push(s.local.into());
+                            specifiers.push(Specifier::Namespace {
+                                local: s.local.into(),
+                            });
                         }
                     }
                 }
 
-                merged.ids.push((src, ids));
+                merged.specifiers.push((src, specifiers));
             }
         }
 

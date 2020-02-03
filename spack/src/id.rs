@@ -41,6 +41,12 @@ impl ModuleIdGenerator {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(JsWord, SyntaxContext);
 
+impl Id {
+    pub fn new(sym: JsWord, ctxt: SyntaxContext) -> Self {
+        Id(sym, ctxt)
+    }
+}
+
 impl From<Ident> for Id {
     fn from(i: Ident) -> Self {
         Id(i.sym, i.span.ctxt())

@@ -1,4 +1,4 @@
-use crate::{util::HygieneRemover, Bundler, Id};
+use crate::{bundler::load_transformed::Specifier, util::HygieneRemover, Bundler, Id};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
@@ -13,7 +13,7 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
-        used_exports: Option<Vec<Id>>,
+        used_exports: Option<Vec<Specifier>>,
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
@@ -43,7 +43,7 @@ pub(super) struct UsageTracker {
     included: Vec<Id>,
     changed: bool,
 
-    used_exports: Option<Vec<Id>>,
+    used_exports: Option<Vec<Specifier>>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -207,7 +207,7 @@ impl Fold<ExportDecl> for UsageTracker {
                 .as_ref()
                 .unwrap()
                 .iter()
-                .any(|exported| exported == i)
+                .any(|exported| exported.local() == i)
         {
             node.span = node.span.apply_mark(self.mark);
             node.decl = self.fold_in_marking_phase(node.decl);
@@ -394,7 +394,7 @@ simple!(ModuleDecl);
 #[derive(Debug)]
 struct IdentListVisitor<'a> {
     included_ids: &'a [Id],
-    exported_ids: &'a [Id],
+    exported_ids: &'a [Specifier],
     found: bool,
 }
 
@@ -407,7 +407,7 @@ impl Visit<Ident> for IdentListVisitor<'_> {
         if self
             .included_ids
             .iter()
-            .chain(self.exported_ids)
+            .chain(self.exported_ids.iter().map(|v| v.local()))
             .any(|i| i == node)
         {
             self.found = true;
