@@ -56,7 +56,7 @@ impl Specifier {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct Source {
     pub is_dynamic: bool,
     pub is_unconditional: bool,
