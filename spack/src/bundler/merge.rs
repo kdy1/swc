@@ -2,13 +2,17 @@ use super::Bundler;
 use crate::{
     bundler::{load_transformed::TransformedModule, scope::Scope},
     chunk::Chunk,
+    debug::HygieneVisualizer,
     util::IdentMarker,
-    ModuleId,
+    Id, ModuleId,
 };
 use anyhow::{Context, Error};
-use swc_common::{errors::Handler, fold::FoldWith, util::move_map::MoveMap, Fold, DUMMY_SP};
+use swc_common::{errors::Handler, fold::FoldWith, util::move_map::MoveMap, Fold, Mark, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_transforms::optimization::{dce, simplifier};
+use swc_ecma_transforms::{
+    hygiene,
+    optimization::{dce, simplifier},
+};
 use swc_ecma_utils::{prepend_stmts, StmtLike};
 
 #[derive(Debug)]
@@ -34,6 +38,13 @@ impl Bundler {
                     .fold_with(&mut dce())
                     .fold_with(&mut IdentMarker(imported.mark()));
 
+                if !ids.is_empty() {
+                    entry = entry.fold_with(&mut ImportMarker {
+                        mark: imported.mark(),
+                        ids: &ids,
+                    });
+                }
+
                 // TODO: Handle renaming
                 buf.extend(dep.body);
             }
@@ -41,7 +52,7 @@ impl Bundler {
 
         prepend_stmts(&mut entry.body, buf.into_iter());
 
-        Ok(entry)
+        Ok(entry.fold_with(&mut hygiene()))
     }
 }
 
@@ -62,5 +73,20 @@ impl Fold<ModuleItem> for Unexporter {
 
             _ => item,
         }
+    }
+}
+
+struct ImportMarker<'a> {
+    mark: Mark,
+    ids: &'a [Id],
+}
+
+impl Fold<Ident> for ImportMarker<'_> {
+    fn fold(&mut self, mut node: Ident) -> Ident {
+        if self.ids.iter().any(|id| *id == node) {
+            node.span = node.span.apply_mark(self.mark);
+        }
+
+        node
     }
 }
