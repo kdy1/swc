@@ -38,6 +38,8 @@ pub(super) struct UsageTracker {
     mark: Mark,
 
     /// Identifiers which should be emitted.
+    ///
+    /// TODO: use FxHashSet for performance
     included: Vec<Id>,
     changed: bool,
 
@@ -57,6 +59,8 @@ where
         //        let upper_changed = replace(&mut self.changed, Default::default());
 
         loop {
+            println!("UsageTracker running: {}", self.pass_cnt);
+
             self.pass_cnt += 1;
             self.changed = false;
             items = items.fold_children(self);
@@ -354,6 +358,22 @@ impl Fold<MemberExpr> for UsageTracker {
         }
 
         e
+    }
+}
+
+impl Fold<FnDecl> for UsageTracker {
+    fn fold(&mut self, mut f: FnDecl) -> FnDecl {
+        println!("\tFold<FnDecl>: {:?}", self.marking_phase);
+
+        if self.is_marked(f.span()) {
+            return f;
+        }
+
+        if self.marking_phase || self.included.contains(&Id::from(&f.ident)) {
+            f.function.span = f.function.span.apply_mark(self.mark);
+        }
+
+        f.fold_children(self)
     }
 }
 
