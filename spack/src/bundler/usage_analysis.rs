@@ -4,7 +4,6 @@ use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned,
 };
 use swc_ecma_ast::*;
-use swc_ecma_transforms::{resolver, resolver::Resolver};
 use swc_ecma_utils::{find_ids, ExprExt, StmtLike};
 
 impl Bundler {
@@ -23,16 +22,6 @@ impl Bundler {
             used_exports,
             marking_phase: false,
         };
-
-        let node = self.swc.run(|| node.fold_with(&mut resolver()));
-
-        {
-            let res = self
-                .swc
-                .print(&node, fm, false, false)
-                .expect("failed to print");
-            println!("{}", res.code);
-        }
 
         let node = self.swc.run(|| node.fold_with(&mut v));
 
