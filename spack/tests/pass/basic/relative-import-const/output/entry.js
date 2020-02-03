@@ -1,1 +1,2 @@
-console.log('string');
+var FOO = 'string';
+console.log(FOO);
