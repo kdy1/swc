@@ -70,7 +70,7 @@ fn load(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
             .unwrap()
             .to_string();
 
-        let input = entry.path().join("input.js");
+        let input = entry.path().join("index.js");
 
         let name = format!("{}", dir_name);
 
@@ -115,11 +115,13 @@ fn load(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                             .join("spack-tests")
                             .join(&dir_name);
 
+                        create_dir_all(&output_dir).unwrap();
+
                         let tmp_dir =
                             tempdir_in(&output_dir).expect("failed to create a temp directory");
                         create_dir_all(&tmp_dir).unwrap();
 
-                        let output_path = tmp_dir.path().join(format!("{}.test.js", dir_name));
+                        let output_path = tmp_dir.path().join(format!("input.test.js"));
 
                         let mut output_file =
                             File::create(&output_path).expect("failed to create output file");
