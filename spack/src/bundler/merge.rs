@@ -28,23 +28,26 @@ impl Bundler {
     ) -> Result<Module, Error> {
         let mut buf = vec![];
         for (src, ids) in &info.merged_imports.ids {
-            //
-            if let Some(imported) = self.scope.get_module(src.module_id) {
-                let dep = (*imported.module).clone();
-                let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
-                let mut dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
-                // TODO: Handle renaming exports
+            if src.is_unconditional {
+                if let Some(imported) = self.scope.get_module(src.module_id) {
+                    let dep = (*imported.module).clone();
+                    let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
+                    let mut dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
+                    // TODO: Handle renaming exports
 
-                if !ids.is_empty() {
-                    let mut v = ImportMarker {
-                        mark: imported.mark(),
-                        ids: &ids,
-                    };
-                    entry = entry.fold_with(&mut v);
-                    dep = dep.fold_with(&mut v);
+                    if !ids.is_empty() {
+                        let mut v = ImportMarker {
+                            mark: imported.mark(),
+                            ids: &ids,
+                        };
+                        entry = entry.fold_with(&mut v);
+                        dep = dep.fold_with(&mut v);
+                    }
+
+                    buf.extend(dep.body);
                 }
-
-                buf.extend(dep.body);
+            } else {
+                unimplemented!("conditional dependency: {} -> {}", info.id, src.module_id)
             }
         }
 
