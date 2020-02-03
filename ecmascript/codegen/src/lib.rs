@@ -289,8 +289,8 @@ impl<'a> Emitter<'a> {
             space!();
             keyword!("from");
             emit!(src);
-            semi!();
         }
+        semi!();
     }
 
     #[emitter]
