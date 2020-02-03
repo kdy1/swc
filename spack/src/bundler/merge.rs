@@ -5,9 +5,10 @@ use crate::{
     ModuleId,
 };
 use anyhow::{Context, Error};
-use swc_common::{errors::Handler, fold::FoldWith, Fold};
+use swc_common::{errors::Handler, fold::FoldWith, util::move_map::MoveMap, Fold, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::prepend_stmts;
+use swc_ecma_transforms::optimization::{dce, simplifier};
+use swc_ecma_utils::{prepend_stmts, StmtLike};
 
 #[derive(Debug)]
 pub(crate) enum MergedModule {
@@ -30,7 +31,7 @@ impl Bundler {
                     (*imported.module).clone(),
                     Some(ids.clone()),
                 );
-                let dep = dep.fold_with(&mut Unexporter);
+                let dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
 
                 // TODO: Handle renaming
                 buf.extend(dep.body);
@@ -51,7 +52,9 @@ impl Fold<ModuleItem> for Unexporter {
         match item {
             ModuleItem::ModuleDecl(decl) => match decl {
                 ModuleDecl::ExportDecl(decl) => ModuleItem::Stmt(Stmt::Decl(decl.decl)),
-
+                ModuleDecl::ExportDefaultExpr(..) => {
+                    ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }))
+                }
                 // TODO: Handle all
                 _ => ModuleItem::ModuleDecl(decl),
             },
