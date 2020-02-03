@@ -26,11 +26,8 @@ impl Bundler {
         for (src, ids) in &info.merged_imports.ids {
             //
             if let Some(imported) = self.scope.get_module(src.module_id) {
-                let dep: Module = self.drop_unused(
-                    imported.fm.clone(),
-                    (*imported.module).clone(),
-                    Some(ids.clone()),
-                );
+                let dep = (*imported.module).clone();
+                let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(ids.clone()));
                 let dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
 
                 // TODO: Handle renaming
