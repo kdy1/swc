@@ -31,3 +31,4 @@ fxhash = "0.2.1"
 testing = { path = "../testing" }
 walkdir = "2.3.1"
 pretty_env_logger = "0.3"
+tempfile = "3"
