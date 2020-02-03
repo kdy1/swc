@@ -2,7 +2,6 @@
 
 set -eu
 
-export RUST_LOG='debug'
 export CI='1'
 export TEST=$1
 
