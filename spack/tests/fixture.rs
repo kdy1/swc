@@ -98,9 +98,7 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
         let ignore = !name.contains(&env::var("TEST").ok().unwrap_or("".into()));
 
         add_test(tests, name, ignore, move || {
-            let _ = pretty_env_logger::formatted_builder()
-                .is_test(true)
-                .try_init();
+            let _ = pretty_env_logger::formatted_builder().try_init();
 
             eprintln!("\n\n========== Running reference test {}\n", dir_name);
 
