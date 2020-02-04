@@ -133,7 +133,7 @@ impl Bundler {
         log::trace!("transform_module({})", fm.name);
 
         let imports = self.extract_import_info(&mut module);
-        let exports = self.extract_export_info(&mut module);
+        let exports = self.extract_export_info(&module);
 
         let (module, (imports, exports)) = rayon::join(
             || -> Result<_, Error> {

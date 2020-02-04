@@ -6,7 +6,7 @@ use crate::{
 use fxhash::FxHashMap;
 use std::mem::replace;
 use swc_atoms::js_word;
-use swc_common::{Fold, FoldWith, Spanned, SyntaxContext, DUMMY_SP};
+use swc_common::{Fold, FoldWith, Spanned, SyntaxContext, Visit, VisitWith, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{find_ids, private_ident};
 
@@ -18,21 +18,11 @@ impl Bundler {
     ///
     /// TODO: Support pattern like
     ///     export const [a, b] = [1, 2]
-    pub(super) fn extract_export_info(&self, module: &mut Module) -> RawExports {
+    pub(super) fn extract_export_info(&self, module: &Module) -> RawExports {
         self.swc.run(|| {
             let mut v = ExportFinder::default();
 
-            let m = replace(
-                module,
-                Module {
-                    span: DUMMY_SP,
-                    body: vec![],
-                    shebang: None,
-                },
-            );
-            let m = m.fold_with(&mut v);
-
-            *module = m;
+            module.visit_with(&mut v);
 
             v.info
         })
@@ -58,8 +48,8 @@ struct ExportFinder {
     info: RawExports,
 }
 
-impl Fold<ModuleItem> for ExportFinder {
-    fn fold(&mut self, item: ModuleItem) -> ModuleItem {
+impl Visit<ModuleItem> for ExportFinder {
+    fn visit(&mut self, item: &ModuleItem) {
         let span = item.span();
 
         match item {
@@ -107,7 +97,7 @@ impl Fold<ModuleItem> for ExportFinder {
                                     alias: None,
                                 });
                             }
-                            return ModuleItem::Stmt(Stmt::Decl(decl.decl));
+                            return;
                         }
                         _ => unreachable!("Decl in ExportDecl: {:?}", decl.decl),
                     };
@@ -117,7 +107,7 @@ impl Fold<ModuleItem> for ExportFinder {
                     }
                 });
 
-                return ModuleItem::Stmt(Stmt::Decl(decl.decl));
+                return;
             }
 
             ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(decl)) => {
@@ -132,25 +122,7 @@ impl Fold<ModuleItem> for ExportFinder {
                         alias: Some(Id::new(js_word!("default"), SyntaxContext::empty())),
                     });
 
-                let expr = match decl.decl {
-                    DefaultDecl::Class(c) => box Expr::Class(c),
-                    DefaultDecl::Fn(f) => box Expr::Fn(f),
-                    DefaultDecl::TsInterfaceDecl(decl) => {
-                        return ModuleItem::Stmt(Stmt::Decl(Decl::TsInterface(decl)))
-                    }
-                };
-
-                return ModuleItem::Stmt(Stmt::Decl(Decl::Var(VarDecl {
-                    span: decl.span,
-                    kind: VarDeclKind::Var,
-                    declare: false,
-                    decls: vec![VarDeclarator {
-                        span: DUMMY_SP,
-                        name: Pat::Ident(i),
-                        init: Some(expr),
-                        definite: false,
-                    }],
-                })));
+                return;
             }
 
             ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(expr)) => {
@@ -165,47 +137,35 @@ impl Fold<ModuleItem> for ExportFinder {
                         alias: Some(Id::new(js_word!("default"), SyntaxContext::empty())),
                     });
 
-                return ModuleItem::Stmt(Stmt::Decl(Decl::Var(VarDecl {
-                    span: expr.span,
-                    kind: VarDeclKind::Var,
-                    declare: false,
-                    decls: vec![VarDeclarator {
-                        span: DUMMY_SP,
-                        name: Pat::Ident(i),
-                        init: Some(expr.expr),
-                        definite: false,
-                    }],
-                })));
+                return;
             }
 
             ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(named)) => {
-                let mut v = self.info.items.entry(named.src).or_default();
-                for s in named.specifiers {
+                let v = self.info.items.entry(named.src.clone()).or_default();
+                for s in &named.specifiers {
                     match s {
                         ExportSpecifier::Namespace(n) => v.push(Specifier::Namespace {
-                            local: n.name.into(),
+                            local: n.name.clone().into(),
                         }),
                         ExportSpecifier::Default(d) => {
                             v.push(Specifier::Specific {
-                                local: d.exported.into(),
+                                local: d.exported.clone().into(),
                                 alias: Some(Id::new(js_word!("default"), SyntaxContext::empty())),
                             });
                         }
                         ExportSpecifier::Named(n) => {
                             v.push(Specifier::Specific {
-                                local: n.orig.into(),
-                                alias: n.exported.map(From::from),
+                                local: n.orig.clone().into(),
+                                alias: n.exported.clone().map(From::from),
                             });
                         }
                     }
                 }
-                return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span }));
+                return;
             }
-
-            // ModuleItem::ModuleDecl(ModuleDecl::ExportAll(all)) => {}
+            // TODO
+            //  ModuleItem::ModuleDecl(ModuleDecl::ExportAll(all)) => {}
             _ => {}
         }
-
-        item
     }
 }
