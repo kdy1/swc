@@ -8,7 +8,7 @@ use std::mem::replace;
 use swc_atoms::js_word;
 use swc_common::{Fold, FoldWith, Spanned, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::private_ident;
+use swc_ecma_utils::{find_ids, private_ident};
 
 impl Bundler {
     /// This method removes exported pure constants from the module.
@@ -97,12 +97,20 @@ impl Fold<ModuleItem> for ExportFinder {
             }
 
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(decl)) => {
-                self.info.items.entry(None).or_default().push({
+                let mut v = self.info.items.entry(None).or_default();
+                v.push({
                     let i = match decl.decl {
                         Decl::Class(ref c) => &c.ident,
                         Decl::Fn(ref f) => &f.ident,
-                        Decl::Var(ref v) => {
-                            return;
+                        Decl::Var(ref var) => {
+                            let ids: Vec<Id> = find_ids(&var.decls);
+                            for id in ids {
+                                v.push(Specifier::Specific {
+                                    local: id,
+                                    alias: None,
+                                });
+                            }
+                            return ModuleItem::Stmt(Stmt::Decl(decl.decl));
                         }
                         _ => unreachable!("Decl in ExportDecl: {:?}", decl.decl),
                     };
