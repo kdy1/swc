@@ -16,6 +16,7 @@ pub use self::{
     Purity::{MayBeImpure, Pure},
 };
 use crate::ident::IdentLike;
+pub use ast;
 use ast::*;
 use scoped_tls::scoped_thread_local;
 use std::{

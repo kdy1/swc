@@ -8,7 +8,7 @@ macro_rules! private_ident {
         use swc_common::Mark;
         let mark = Mark::fresh(Mark::root());
         let span = $span.apply_mark(mark);
-        ::ast::Ident::new($s.into(), span)
+        $crate::ast::Ident::new($s.into(), span)
     }};
 }
 
@@ -18,7 +18,7 @@ macro_rules! quote_ident {
         quote_ident!(::swc_common::DUMMY_SP, $s)
     };
     ($span:expr, $s:expr) => {{
-        ::ast::Ident::new($s.into(), $span)
+        $crate::ast::Ident::new($s.into(), $span)
     }};
 }
 
@@ -28,7 +28,7 @@ macro_rules! quote_str {
         quote_str!(::swc_common::DUMMY_SP, $s)
     };
     ($span:expr, $s:expr) => {{
-        ::ast::Str {
+        $crate::ast::Str {
             span: $span,
             value: $s.into(),
             has_escape: false,
