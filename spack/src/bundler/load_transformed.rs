@@ -1,6 +1,9 @@
 use super::Bundler;
 use crate::{
-    bundler::{export::Exports, import::RawImports},
+    bundler::{
+        export::{Exports, RawExports},
+        import::RawImports,
+    },
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
@@ -126,7 +129,7 @@ impl Bundler {
         let imports = self.extract_import_info(&mut module);
         let exports = self.extract_export_info(&mut module);
 
-        let (module, imports) = rayon::join(
+        let (module, info) = rayon::join(
             || -> Result<_, Error> {
                 self.swc.run(|| {
                     // Process module
@@ -157,12 +160,12 @@ impl Bundler {
                     };
 
                     // Load dependencies
-                    self.load_imports(&p, imports)
+                    self.load_imports(&p, imports, exports)
                 })
             },
         );
 
-        let imports = imports?;
+        let (imports, exports) = info?;
         let module = module?;
         let module = self.drop_unused(fm.clone(), module, None);
 
@@ -180,15 +183,21 @@ impl Bundler {
         })
     }
 
-    fn load_imports(&self, base: &Path, info: RawImports) -> Result<Imports, Error> {
+    fn load_imports(
+        &self,
+        base: &Path,
+        imports: RawImports,
+        exports: RawExports,
+    ) -> Result<(Imports, Exports), Error> {
         log::trace!("load_imports({})", base.display());
 
-        let mut merged = Imports::default();
+        let mut m_imports = Imports::default();
+        let mut m_exports = Exports::default();
         let RawImports {
             imports,
             lazy_imports,
             dynamic_imports,
-        } = info;
+        } = imports;
 
         let loaded = imports
             .into_par_iter()
@@ -249,10 +258,10 @@ impl Bundler {
                     }
                 }
 
-                merged.specifiers.push((src, specifiers));
+                m_imports.specifiers.push((src, specifiers));
             }
         }
 
-        Ok(merged)
+        Ok((m_imports, m_exports))
     }
 }
