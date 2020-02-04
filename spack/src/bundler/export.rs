@@ -56,7 +56,7 @@ pub(super) struct Exports {
 #[derive(Debug)]
 pub struct ExportSpec {
     pub local: Id,
-    pub exported: Id,
+    pub exported: Option<Id>,
 }
 
 #[derive(Debug, Default)]
