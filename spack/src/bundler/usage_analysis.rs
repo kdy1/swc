@@ -1,8 +1,4 @@
-use crate::{
-    bundler::{export::Exports, load_transformed::Specifier},
-    util::HygieneRemover,
-    Bundler, Id,
-};
+use crate::{bundler::load_transformed::Specifier, util::HygieneRemover, Bundler, Id};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
@@ -17,7 +13,7 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
-        used_exports: &[Specifier],
+        used_exports: Option<&[Specifier]>,
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
@@ -47,7 +43,7 @@ pub(super) struct UsageTracker<'a> {
     included: Vec<Id>,
     changed: bool,
 
-    used_exports: &'a [Specifier],
+    used_exports: Option<&'a [Specifier]>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -183,17 +179,19 @@ impl Fold<ExportDecl> for UsageTracker<'_> {
 
             // Preserve only exported variables
             Decl::Var(ref mut v) => {
-                v.decls.retain(|d| {
-                    let mut v = IdentListVisitor {
-                        included_ids: &self.included,
-                        exported_ids: &self.used_exports,
-                        found: false,
-                    };
+                if let Some(ref exported_ids) = self.used_exports {
+                    v.decls.retain(|d| {
+                        let mut v = IdentListVisitor {
+                            included_ids: &self.included,
+                            exported_ids: &exported_ids,
+                            found: false,
+                        };
 
-                    d.visit_with(&mut v);
+                        d.visit_with(&mut v);
 
-                    v.found
-                });
+                        v.found
+                    });
+                }
 
                 if !v.decls.is_empty() {
                     node.span = node.span.apply_mark(self.mark);
@@ -203,10 +201,13 @@ impl Fold<ExportDecl> for UsageTracker<'_> {
             }
         };
 
-        if self
-            .used_exports
-            .iter()
-            .any(|exported| exported.local() == i)
+        if self.used_exports.is_none()
+            || self
+                .used_exports
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|exported| exported.local() == i)
         {
             node.span = node.span.apply_mark(self.mark);
             node.decl = self.fold_in_marking_phase(node.decl);
@@ -218,25 +219,58 @@ impl Fold<ExportDecl> for UsageTracker<'_> {
 
 impl Fold<ExportDefaultExpr> for UsageTracker<'_> {
     fn fold(&mut self, mut node: ExportDefaultExpr) -> ExportDefaultExpr {
-        unreachable!()
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.expr = self.fold_in_marking_phase(node.expr);
+
+        node
     }
 }
 
 impl Fold<NamedExport> for UsageTracker<'_> {
     fn fold(&mut self, mut node: NamedExport) -> NamedExport {
-        unreachable!()
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.specifiers = self.fold_in_marking_phase(node.specifiers);
+
+        node
     }
 }
 
 impl Fold<ExportDefaultDecl> for UsageTracker<'_> {
     fn fold(&mut self, mut node: ExportDefaultDecl) -> ExportDefaultDecl {
-        unreachable!()
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        node.span = node.span.apply_mark(self.mark);
+        node.decl = self.fold_in_marking_phase(node.decl);
+
+        node
     }
 }
 
 impl Fold<ExportAll> for UsageTracker<'_> {
     fn fold(&mut self, node: ExportAll) -> ExportAll {
-        unreachable!()
+        if self.is_marked(node.span) {
+            return node;
+        }
+
+        // TODO: Export only when it's required. (i.e. check self.used_exports)
+
+        unimplemented!("drop_unused: `export * from 'foo'`")
     }
 }
 
@@ -287,32 +321,19 @@ impl Fold<VarDecl> for UsageTracker<'_> {
             return var;
         }
 
-        println!("Fold<VarDecl>. \n{}\n{:?}", self.path, self.used_exports);
-
         let var: VarDecl = var.fold_children(self);
 
-        if self.included.is_empty() && self.used_exports.is_empty() {
+        if self.included.is_empty() {
             return var;
         }
 
-        let ids: Vec<Id> = find_ids(&var.decls);
+        let ids: Vec<Ident> = find_ids(&var.decls);
 
         for i in ids {
             for i1 in &self.included {
                 if *i1 == i {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
-                        decls: self.fold_in_marking_phase(var.decls),
-                        ..var
-                    };
-                }
-            }
-
-            for i1 in self.used_exports {
-                if *i1.local() == i {
-                    return VarDecl {
-                        span: var.span.apply_mark(self.mark),
-                        decls: self.fold_in_marking_phase(var.decls),
                         ..var
                     };
                 }
@@ -344,10 +365,7 @@ impl Fold<FnDecl> for UsageTracker<'_> {
             return f;
         }
 
-        if self.marking_phase
-            || self.used_exports.iter().any(|s| *s.local() == f.ident)
-            || self.included.contains(&Id::from(&f.ident))
-        {
+        if self.marking_phase || self.included.contains(&Id::from(&f.ident)) {
             f.function.span = f.function.span.apply_mark(self.mark);
         }
 
