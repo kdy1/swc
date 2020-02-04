@@ -188,6 +188,9 @@ impl Bundler {
         log::trace!("load_exports({})", base.display());
 
         let mut exports = Exports::default();
+        exports.pure_constants = raw.pure_constants;
+
+        for (src, specifiers) in raw.items {}
 
         Ok(exports)
     }
