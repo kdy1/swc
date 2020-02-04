@@ -1,4 +1,8 @@
-use crate::{bundler::load_transformed::Specifier, util::HygieneRemover, Bundler, Id};
+use crate::{
+    bundler::{export::Exports, load_transformed::Specifier},
+    util::HygieneRemover,
+    Bundler, Id,
+};
 use std::sync::Arc;
 use swc_common::{
     util::move_map::MoveMap, FileName, Fold, FoldWith, Mark, SourceFile, Span, Spanned, Visit,
@@ -13,7 +17,7 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
-        used_exports: Option<Vec<Specifier>>,
+        used_exports: Option<&[Specifier]>,
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
@@ -34,7 +38,7 @@ impl Bundler {
 }
 
 #[derive(Debug)]
-pub(super) struct UsageTracker {
+pub(super) struct UsageTracker<'a> {
     pass_cnt: usize,
     /// Applied to used nodes.
     mark: Mark,
@@ -43,14 +47,14 @@ pub(super) struct UsageTracker {
     included: Vec<Id>,
     changed: bool,
 
-    used_exports: Option<Vec<Specifier>>,
+    used_exports: Option<&'a [Specifier]>,
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
     path: FileName,
 }
 
-impl<T> Fold<Vec<T>> for UsageTracker
+impl<T> Fold<Vec<T>> for UsageTracker<'_>
 where
     T: StmtLike + FoldWith<Self> + Spanned + std::fmt::Debug,
 {
@@ -97,7 +101,7 @@ where
     }
 }
 
-impl UsageTracker {
+impl UsageTracker<'_> {
     pub fn is_marked(&self, span: Span) -> bool {
         let mut ctxt = span.ctxt().clone();
 
@@ -127,7 +131,7 @@ impl UsageTracker {
     }
 }
 
-impl Fold<ImportDecl> for UsageTracker {
+impl Fold<ImportDecl> for UsageTracker<'_> {
     fn fold(&mut self, import: ImportDecl) -> ImportDecl {
         if self.is_marked(import.span) {
             return import;
@@ -162,7 +166,7 @@ impl Fold<ImportDecl> for UsageTracker {
     }
 }
 
-impl Fold<ExportDecl> for UsageTracker {
+impl Fold<ExportDecl> for UsageTracker<'_> {
     fn fold(&mut self, mut node: ExportDecl) -> ExportDecl {
         if self.is_marked(node.span) {
             return node;
@@ -217,64 +221,31 @@ impl Fold<ExportDecl> for UsageTracker {
     }
 }
 
-impl Fold<ExportDefaultExpr> for UsageTracker {
+impl Fold<ExportDefaultExpr> for UsageTracker<'_> {
     fn fold(&mut self, mut node: ExportDefaultExpr) -> ExportDefaultExpr {
-        if self.is_marked(node.span) {
-            return node;
-        }
-
-        // TODO: Export only when it's required. (i.e. check self.used_exports)
-
-        node.span = node.span.apply_mark(self.mark);
-        node.expr = self.fold_in_marking_phase(node.expr);
-
-        node
+        unreachable!()
     }
 }
 
-impl Fold<NamedExport> for UsageTracker {
+impl Fold<NamedExport> for UsageTracker<'_> {
     fn fold(&mut self, mut node: NamedExport) -> NamedExport {
-        if self.is_marked(node.span) {
-            return node;
-        }
-
-        // TODO: Export only when it's required. (i.e. check self.used_exports)
-
-        node.span = node.span.apply_mark(self.mark);
-        node.specifiers = self.fold_in_marking_phase(node.specifiers);
-
-        node
+        unreachable!()
     }
 }
 
-impl Fold<ExportDefaultDecl> for UsageTracker {
+impl Fold<ExportDefaultDecl> for UsageTracker<'_> {
     fn fold(&mut self, mut node: ExportDefaultDecl) -> ExportDefaultDecl {
-        if self.is_marked(node.span) {
-            return node;
-        }
-
-        // TODO: Export only when it's required. (i.e. check self.used_exports)
-
-        node.span = node.span.apply_mark(self.mark);
-        node.decl = self.fold_in_marking_phase(node.decl);
-
-        node
+        unreachable!()
     }
 }
 
-impl Fold<ExportAll> for UsageTracker {
+impl Fold<ExportAll> for UsageTracker<'_> {
     fn fold(&mut self, node: ExportAll) -> ExportAll {
-        if self.is_marked(node.span) {
-            return node;
-        }
-
-        // TODO: Export only when it's required. (i.e. check self.used_exports)
-
-        unimplemented!("drop_unused: `export * from 'foo'`")
+        unreachable!()
     }
 }
 
-impl Fold<ExprStmt> for UsageTracker {
+impl Fold<ExprStmt> for UsageTracker<'_> {
     fn fold(&mut self, node: ExprStmt) -> ExprStmt {
         if self.is_marked(node.span) {
             return node;
@@ -294,7 +265,7 @@ impl Fold<ExprStmt> for UsageTracker {
     }
 }
 
-impl Fold<Ident> for UsageTracker {
+impl Fold<Ident> for UsageTracker<'_> {
     fn fold(&mut self, i: Ident) -> Ident {
         if self.is_marked(i.span) {
             return i;
@@ -315,7 +286,7 @@ impl Fold<Ident> for UsageTracker {
     }
 }
 
-impl Fold<VarDecl> for UsageTracker {
+impl Fold<VarDecl> for UsageTracker<'_> {
     fn fold(&mut self, var: VarDecl) -> VarDecl {
         if self.is_marked(var.span) {
             return var;
@@ -344,7 +315,7 @@ impl Fold<VarDecl> for UsageTracker {
     }
 }
 
-impl Fold<MemberExpr> for UsageTracker {
+impl Fold<MemberExpr> for UsageTracker<'_> {
     fn fold(&mut self, mut e: MemberExpr) -> MemberExpr {
         if self.is_marked(e.span()) {
             return e;
@@ -359,7 +330,7 @@ impl Fold<MemberExpr> for UsageTracker {
     }
 }
 
-impl Fold<FnDecl> for UsageTracker {
+impl Fold<FnDecl> for UsageTracker<'_> {
     fn fold(&mut self, mut f: FnDecl) -> FnDecl {
         if self.is_marked(f.span()) {
             return f;
@@ -375,7 +346,7 @@ impl Fold<FnDecl> for UsageTracker {
 
 macro_rules! simple {
     ($T:ty) => {
-        impl Fold<$T> for UsageTracker {
+        impl Fold<$T> for UsageTracker<'_> {
             fn fold(&mut self, node: $T) -> $T {
                 if self.is_marked(node.span()) {
                     return node;
