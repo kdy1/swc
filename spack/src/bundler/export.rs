@@ -53,10 +53,10 @@ pub(super) struct Exports {
     pub items: FxHashMap<Option<Source>, Vec<ExportSpec>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ExportSpec {
-    pub specifier: Vec<Specifier>,
-    pub src: Option<Str>,
+    pub local: Id,
+    pub exported: Id,
 }
 
 #[derive(Debug, Default)]
