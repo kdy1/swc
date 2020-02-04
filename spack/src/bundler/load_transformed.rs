@@ -43,7 +43,7 @@ pub(super) struct Imports {
 /// Clone is relatively cheap
 #[derive(Debug, Clone, Is)]
 pub(super) enum Specifier {
-    Specific { local: Id, orig: Option<Id> },
+    Specific { local: Id, alias: Option<Id> },
     Namespace { local: Id },
 }
 
@@ -235,11 +235,11 @@ impl Bundler {
                     match s {
                         ImportSpecifier::Specific(s) => specifiers.push(Specifier::Specific {
                             local: s.local.into(),
-                            orig: s.imported.map(From::from),
+                            alias: s.imported.map(From::from),
                         }),
                         ImportSpecifier::Default(s) => specifiers.push(Specifier::Specific {
                             local: s.local.into(),
-                            orig: Some(Id::new(js_word!("default"), s.span.ctxt())),
+                            alias: Some(Id::new(js_word!("default"), s.span.ctxt())),
                         }),
                         ImportSpecifier::Namespace(s) => {
                             specifiers.push(Specifier::Namespace {
