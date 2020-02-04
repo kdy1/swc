@@ -11,7 +11,7 @@ impl Bundler {
     /// remain as-is.
     ///
     /// This method also drops empty statements from the module.
-    pub(super) fn extract_import_info(&self, module: &mut Module) -> ImportInfo {
+    pub(super) fn extract_import_info(&self, module: &mut Module) -> RawImports {
         let body = replace(&mut module.body, vec![]);
 
         let mut v = ImportFinder {
@@ -26,7 +26,7 @@ impl Bundler {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ImportInfo {
+pub(super) struct RawImports {
     /// Unconditional imports. This includes require on top level.
     pub imports: Vec<ImportDecl>,
 
@@ -46,7 +46,7 @@ pub(super) struct ImportInfo {
 
 struct ImportFinder {
     top_level: bool,
-    info: ImportInfo,
+    info: RawImports,
 }
 
 impl Fold<Vec<ModuleItem>> for ImportFinder {

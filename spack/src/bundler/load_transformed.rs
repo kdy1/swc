@@ -1,6 +1,6 @@
 use super::Bundler;
 use crate::{
-    bundler::{export::Exports, import::ImportInfo},
+    bundler::{export::Exports, import::RawImports},
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
@@ -180,11 +180,11 @@ impl Bundler {
         })
     }
 
-    fn load_imports(&self, base: &Path, info: ImportInfo) -> Result<MergedImports, Error> {
+    fn load_imports(&self, base: &Path, info: RawImports) -> Result<MergedImports, Error> {
         log::trace!("load_imports({})", base.display());
 
         let mut merged = MergedImports::default();
-        let ImportInfo {
+        let RawImports {
             imports,
             lazy_imports,
             dynamic_imports,
