@@ -1,6 +1,9 @@
 use super::Bundler;
 use crate::{
-    bundler::{export::Exports, import::RawImports},
+    bundler::{
+        export::{Exports, RawExports},
+        import::RawImports,
+    },
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
@@ -126,7 +129,7 @@ impl Bundler {
         let imports = self.extract_import_info(&mut module);
         let exports = self.extract_export_info(&mut module);
 
-        let (module, info) = rayon::join(
+        let (module, (imports, exports)) = rayon::join(
             || -> Result<_, Error> {
                 self.swc.run(|| {
                     // Process module
@@ -148,21 +151,22 @@ impl Bundler {
                 })
             },
             || {
-                self.swc.run(|| {
-                    let p = match fm.name {
-                        FileName::Real(ref p) => p,
-                        // stdin compilation
-                        FileName::Anon => &self.working_dir,
-                        _ => unreachable!("{} module in spack", fm.name),
-                    };
+                let p = match fm.name {
+                    FileName::Real(ref p) => p,
+                    // stdin compilation
+                    FileName::Anon => &self.working_dir,
+                    _ => unreachable!("{} module in spack", fm.name),
+                };
 
-                    // Load dependencies
-                    self.load_imports(&p, imports)
-                })
+                rayon::join(
+                    || self.swc.run(|| self.load_imports(&p, imports)),
+                    || self.swc.run(|| self.load_exports(&p, exports)),
+                )
             },
         );
 
-        let (imports, exports) = info?;
+        let imports = imports?;
+        let exports = exports?;
         let module = module?;
         let module = self.drop_unused(fm.clone(), module, None);
 
@@ -180,6 +184,15 @@ impl Bundler {
         })
     }
 
+    fn load_exports(&self, base: &Path, raw: RawExports) -> Result<Exports, Error> {
+        log::trace!("load_exports({})", base.display());
+
+        let mut exports = Exports::default();
+
+        Ok(exports)
+    }
+
+    /// Load dependencies
     fn load_imports(&self, base: &Path, info: RawImports) -> Result<Imports, Error> {
         log::trace!("load_imports({})", base.display());
 
