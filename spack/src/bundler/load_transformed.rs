@@ -105,6 +105,12 @@ impl Bundler {
 
         self.scope.store_module(path.clone(), v.clone());
 
+        {
+            let code = self.swc.print(&*v.module, fm, false, false).unwrap().code;
+
+            println!("Loaded:\n{}\n\n\n", code);
+        }
+
         Ok((path, v))
     }
 

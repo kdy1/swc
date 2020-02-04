@@ -287,7 +287,7 @@ impl Fold<VarDecl> for UsageTracker<'_> {
             return var;
         }
 
-        println!("Fold<VarDecl>");
+        println!("Fold<VarDecl>. \n{}\n{:?}", self.path, self.used_exports);
 
         let var: VarDecl = var.fold_children(self);
 
@@ -297,13 +297,12 @@ impl Fold<VarDecl> for UsageTracker<'_> {
 
         let ids: Vec<Id> = find_ids(&var.decls);
 
-        println!("Fold<VarDecl>: ids = {:?}", ids);
-
         for i in ids {
             for i1 in &self.included {
                 if *i1 == i {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
+                        decls: self.fold_in_marking_phase(var.decls),
                         ..var
                     };
                 }
@@ -313,6 +312,7 @@ impl Fold<VarDecl> for UsageTracker<'_> {
                 if *i1.local() == i {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
+                        decls: self.fold_in_marking_phase(var.decls),
                         ..var
                     };
                 }
