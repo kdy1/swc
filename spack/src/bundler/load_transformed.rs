@@ -20,7 +20,7 @@ pub(super) struct TransformedModule {
     pub id: ModuleId,
     pub fm: Arc<SourceFile>,
     pub module: Arc<Module>,
-    pub imports: Arc<MergedImports>,
+    pub imports: Arc<Imports>,
     pub exports: Arc<Exports>,
     pub is_dynamic: bool,
 
@@ -35,7 +35,7 @@ impl TransformedModule {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct MergedImports {
+pub(super) struct Imports {
     /// If imported ids are empty, it is a side-effect import.
     pub specifiers: Vec<(Source, Vec<Specifier>)>,
 }
@@ -180,10 +180,10 @@ impl Bundler {
         })
     }
 
-    fn load_imports(&self, base: &Path, info: RawImports) -> Result<MergedImports, Error> {
+    fn load_imports(&self, base: &Path, info: RawImports) -> Result<Imports, Error> {
         log::trace!("load_imports({})", base.display());
 
-        let mut merged = MergedImports::default();
+        let mut merged = Imports::default();
         let RawImports {
             imports,
             lazy_imports,
