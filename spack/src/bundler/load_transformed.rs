@@ -20,7 +20,7 @@ pub(super) struct TransformedModule {
     pub id: ModuleId,
     pub fm: Arc<SourceFile>,
     pub module: Arc<Module>,
-    pub merged_imports: Arc<MergedImports>,
+    pub imports: Arc<MergedImports>,
     pub exports: Arc<Exports>,
     pub is_dynamic: bool,
 
@@ -173,7 +173,7 @@ impl Bundler {
             id,
             fm,
             module,
-            merged_imports: Arc::new(imports),
+            imports: Arc::new(imports),
             exports: Arc::new(exports),
             is_dynamic: false,
             mark,

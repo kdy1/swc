@@ -22,7 +22,7 @@ impl Bundler {
         info: &TransformedModule,
     ) -> Result<Module, Error> {
         let mut buf = vec![];
-        for (src, specifiers) in &info.merged_imports.specifiers {
+        for (src, specifiers) in &info.imports.specifiers {
             if specifiers.iter().any(|v| v.is_namespace()) {
                 unimplemented!("namespace dependency: {} -> {}", info.id, src.module_id)
             }
