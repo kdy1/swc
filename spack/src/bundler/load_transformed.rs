@@ -1,6 +1,6 @@
 use super::Bundler;
 use crate::{
-    bundler::{export::ExportInfo, import::ImportInfo},
+    bundler::{export::Exports, import::ImportInfo},
     Id, ModuleId,
 };
 use anyhow::{Context, Error};
@@ -21,7 +21,7 @@ pub(super) struct TransformedModule {
     pub fm: Arc<SourceFile>,
     pub module: Arc<Module>,
     pub merged_imports: Arc<MergedImports>,
-    pub exports: Arc<ExportInfo>,
+    pub exports: Arc<Exports>,
     pub is_dynamic: bool,
 
     mark: Mark,

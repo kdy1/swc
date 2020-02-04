@@ -1,9 +1,14 @@
 use super::Bundler;
-use crate::Id;
+use crate::{
+    bundler::load_transformed::{Source, Specifier},
+    Id,
+};
 use anyhow::Error;
+use fxhash::FxHashMap;
 use std::mem::replace;
 use swc_common::{Fold, FoldWith, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_utils::private_ident;
 
 impl Bundler {
     /// This method removes exported pure constants from the module.
@@ -13,33 +18,50 @@ impl Bundler {
     ///
     /// TODO: Support pattern like
     ///     export const [a, b] = [1, 2]
-    pub(super) fn extract_export_info(&self, module: &mut Module) -> ExportInfo {
-        let mut v = ExportFinder::default();
+    pub(super) fn extract_export_info(&self, module: &mut Module) -> RawExports {
+        self.swc.run(|| {
+            let mut v = ExportFinder::default();
 
-        let m = replace(
-            module,
-            Module {
-                span: DUMMY_SP,
-                body: vec![],
-                shebang: None,
-            },
-        );
-        let m = m.fold_with(&mut v);
+            let m = replace(
+                module,
+                Module {
+                    span: DUMMY_SP,
+                    body: vec![],
+                    shebang: None,
+                },
+            );
+            let m = m.fold_with(&mut v);
 
-        *module = m;
+            *module = m;
 
-        v.info
+            v.info
+        })
     }
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ExportInfo {
+pub(super) struct RawExports {
     pub pure_constants: Vec<(Id, Lit)>,
+    /// Key is None if it's exported from the module itself.
+    pub items: FxHashMap<Option<Str>, Vec<ExportSpec>>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct Exports {
+    pub pure_constants: Vec<(Id, Lit)>,
+    /// Key is None if it's exported from the module itself.
+    pub items: FxHashMap<Option<Source>, Vec<ExportSpec>>,
+}
+
+#[derive(Debug, Default)]
+pub struct ExportSpec {
+    pub specifier: Vec<Specifier>,
+    pub src: Option<Str>,
 }
 
 #[derive(Debug, Default)]
 struct ExportFinder {
-    info: ExportInfo,
+    info: RawExports,
 }
 
 impl Fold<ModuleItem> for ExportFinder {
@@ -78,9 +100,36 @@ impl Fold<ModuleItem> for ExportFinder {
                 return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }));
             }
 
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(decl)) => {
+                self.info.items.entry(None).or_default().push(decl.ident());
+
+                return ModuleItem::Stmt(Stmt::Decl(decl.decl));
+            }
+
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(decl)) => {
+                let i = private_ident!("_default");
+                self.info.items.entry(None).or_default().push(i.clone());
+            }
+
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(expr)) => {
+                let i = private_ident!("_default");
+
+                self.info.items.entry(None).or_default().push(i.clone());
+            }
+
+            ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(named)) => {
+                self.info
+                    .items
+                    .entry(named.src)
+                    .or_default()
+                    .push(i.clone());
+            }
+
+            ModuleItem::ModuleDecl(ModuleDecl::ExportAll(all)) => {}
+
             _ => {}
         }
 
-        item.fold_children(self)
+        item
     }
 }
