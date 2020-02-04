@@ -30,7 +30,7 @@ impl Bundler {
             if src.is_unconditional {
                 if let Some(imported) = self.scope.get_module(src.module_id) {
                     let dep = (*imported.module).clone();
-                    let dep: Module = self.drop_unused(imported.fm.clone(), dep, Some(&specifiers));
+                    let dep: Module = self.drop_unused(imported.fm.clone(), dep, &specifiers);
                     let mut dep = dep.fold_with(&mut Unexporter).fold_with(&mut dce());
                     // TODO: Handle renaming exports
 

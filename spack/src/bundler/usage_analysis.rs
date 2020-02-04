@@ -17,7 +17,7 @@ impl Bundler {
         &self,
         fm: Arc<SourceFile>,
         node: Module,
-        used_exports: Option<&[Specifier]>,
+        used_exports: &[Specifier],
     ) -> Module {
         let mut v = UsageTracker {
             path: fm.name.clone(),
@@ -47,7 +47,7 @@ pub(super) struct UsageTracker<'a> {
     included: Vec<Id>,
     changed: bool,
 
-    used_exports: Option<&'a [Specifier]>,
+    used_exports: &'a [Specifier],
 
     /// If true, idents are added to [changed].
     marking_phase: bool,
@@ -183,19 +183,17 @@ impl Fold<ExportDecl> for UsageTracker<'_> {
 
             // Preserve only exported variables
             Decl::Var(ref mut v) => {
-                if let Some(ref exported_ids) = self.used_exports {
-                    v.decls.retain(|d| {
-                        let mut v = IdentListVisitor {
-                            included_ids: &self.included,
-                            exported_ids: &exported_ids,
-                            found: false,
-                        };
+                v.decls.retain(|d| {
+                    let mut v = IdentListVisitor {
+                        included_ids: &self.included,
+                        exported_ids: &self.used_exports,
+                        found: false,
+                    };
 
-                        d.visit_with(&mut v);
+                    d.visit_with(&mut v);
 
-                        v.found
-                    });
-                }
+                    v.found
+                });
 
                 if !v.decls.is_empty() {
                     node.span = node.span.apply_mark(self.mark);
@@ -205,13 +203,10 @@ impl Fold<ExportDecl> for UsageTracker<'_> {
             }
         };
 
-        if self.used_exports.is_none()
-            || self
-                .used_exports
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|exported| exported.local() == i)
+        if self
+            .used_exports
+            .iter()
+            .any(|exported| exported.local() == i)
         {
             node.span = node.span.apply_mark(self.mark);
             node.decl = self.fold_in_marking_phase(node.decl);
@@ -292,17 +287,30 @@ impl Fold<VarDecl> for UsageTracker<'_> {
             return var;
         }
 
+        println!("Fold<VarDecl>");
+
         let var: VarDecl = var.fold_children(self);
 
-        if self.included.is_empty() {
+        if self.included.is_empty() && self.used_exports.is_empty() {
             return var;
         }
 
-        let ids: Vec<Ident> = find_ids(&var.decls);
+        let ids: Vec<Id> = find_ids(&var.decls);
+
+        println!("Fold<VarDecl>: ids = {:?}", ids);
 
         for i in ids {
             for i1 in &self.included {
                 if *i1 == i {
+                    return VarDecl {
+                        span: var.span.apply_mark(self.mark),
+                        ..var
+                    };
+                }
+            }
+
+            for i1 in self.used_exports {
+                if *i1.local() == i {
                     return VarDecl {
                         span: var.span.apply_mark(self.mark),
                         ..var
@@ -336,7 +344,10 @@ impl Fold<FnDecl> for UsageTracker<'_> {
             return f;
         }
 
-        if self.marking_phase || self.included.contains(&Id::from(&f.ident)) {
+        if self.marking_phase
+            || self.used_exports.iter().any(|s| *s.local() == f.ident)
+            || self.included.contains(&Id::from(&f.ident))
+        {
             f.function.span = f.function.span.apply_mark(self.mark);
         }
 

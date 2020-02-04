@@ -168,7 +168,7 @@ impl Bundler {
         let imports = imports?;
         let exports = exports?;
         let module = module?;
-        let module = self.drop_unused(fm.clone(), module, None);
+        let module = self.drop_unused(fm.clone(), module, &exports.items);
 
         let module = Arc::new(module);
         let mark = self.swc.run(|| Mark::fresh(Mark::root()));

@@ -49,8 +49,8 @@ pub(super) struct RawExports {
 #[derive(Debug, Default)]
 pub(super) struct Exports {
     pub pure_constants: Vec<(Id, Lit)>,
-    /// Key is None if it's exported from the module itself.
-    pub items: FxHashMap<Option<Source>, Vec<Specifier>>,
+    pub items: Vec<Specifier>,
+    pub reexports: FxHashMap<Source, Vec<Specifier>>,
 }
 
 #[derive(Debug, Default)]
@@ -63,39 +63,36 @@ impl Fold<ModuleItem> for ExportFinder {
         let span = item.span();
 
         match item {
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
-                decl: Decl::Var(v),
-                ..
-            })) if v.kind == VarDeclKind::Const
-                && v.decls.iter().all(|v| {
-                    (match v.name {
-                        Pat::Ident(..) => true,
-                        _ => false,
-                    }) && (match v.init {
-                        Some(box Expr::Lit(..)) => true,
-                        _ => false,
-                    })
-                }) =>
-            {
-                self.info
-                    .pure_constants
-                    .extend(v.decls.into_iter().map(|decl| {
-                        let id = match decl.name {
-                            Pat::Ident(i) => i.into(),
-                            _ => unreachable!(),
-                        };
-
-                        let lit = match decl.init {
-                            Some(box Expr::Lit(l)) => l,
-                            _ => unreachable!(),
-                        };
-
-                        (id, lit)
-                    }));
-
-                return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }));
-            }
-
+            // TODO: Optimize pure constants
+            //            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+            //                decl: Decl::Var(v),
+            //                ..
+            //            })) if v.kind == VarDeclKind::Const
+            //                && v.decls.iter().all(|v| {
+            //                    (match v.name {
+            //                        Pat::Ident(..) => true,
+            //                        _ => false,
+            //                    }) && (match v.init {
+            //                        Some(box Expr::Lit(..)) => true,
+            //                        _ => false,
+            //                    })
+            //                }) =>
+            //            {
+            //                self.info
+            //                    .pure_constants
+            //                    .extend(v.decls.into_iter().map(|decl| {
+            //                        let id = match decl.name {
+            //                            Pat::Ident(i) => i.into(),
+            //                            _ => unreachable!(),
+            //                        };
+            //                        let lit = match decl.init {
+            //                            Some(box Expr::Lit(l)) => l,
+            //                            _ => unreachable!(),
+            //                        };
+            //                        (id, lit)
+            //                    }));
+            //                return ModuleItem::Stmt(Stmt::Empty(EmptyStmt { span: DUMMY_SP }));
+            //            }
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(decl)) => {
                 let mut v = self.info.items.entry(None).or_default();
                 v.push({
