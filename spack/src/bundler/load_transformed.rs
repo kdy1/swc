@@ -190,7 +190,36 @@ impl Bundler {
         let mut exports = Exports::default();
         exports.pure_constants = raw.pure_constants;
 
-        for (src, specifiers) in raw.items {}
+        let items = raw
+            .items
+            .into_par_iter()
+            .map(|(src, ss)| -> Result<_, Error> {
+                let info = match src {
+                    Some(src) => Some((self.load_transformed_inner(base, &src.value)?, src)),
+                    None => None,
+                };
+
+                Ok((info, ss))
+            })
+            .collect::<Vec<_>>();
+
+        for res in items {
+            let (info, specifiers): (Option<((Arc<PathBuf>, TransformedModule), Str)>, _) = res?;
+
+            match info {
+                None => exports.items.extend(specifiers),
+                Some(info) => exports
+                    .reexports
+                    .entry(Source {
+                        is_dynamic: false,
+                        is_unconditional: false,
+                        module_id: (info.0).1.id,
+                        src: info.1,
+                    })
+                    .or_default()
+                    .extend(specifiers),
+            }
+        }
 
         Ok(exports)
     }
