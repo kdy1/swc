@@ -437,6 +437,10 @@ pub enum Error {
         span: Span,
     },
 
+    TS7053 {
+        span: Span,
+    },
+
     /// `TS2358`
     InvalidLhsInInstanceOf {
         span: Span,

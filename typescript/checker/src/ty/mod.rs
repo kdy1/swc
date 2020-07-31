@@ -179,6 +179,13 @@ pub enum ClassMember {
 }
 
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]
+pub struct Property {
+    pub span: Span,
+    pub key: Box<Expr>,
+    pub value: Option<Type>,
+}
+
+#[derive(Debug, Fold, Clone, PartialEq, Spanned)]
 pub struct ClassProperty {
     pub span: Span,
     pub key: Box<Expr>,
@@ -434,6 +441,7 @@ pub struct Function {
     pub type_params: Option<TypeParamDecl>,
     pub params: Vec<FnParam>,
     pub ret_ty: Box<Type>,
+    pub properties: Vec<Property>,
 }
 
 #[derive(Debug, Fold, Clone, PartialEq, Spanned)]

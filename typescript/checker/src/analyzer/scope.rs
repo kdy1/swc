@@ -1235,6 +1235,7 @@ impl Fold<Type> for Expander<'_, '_, '_> {
                     type_params,
                     params,
                     ret_ty,
+                    properties,
                 }) => {
                     let ret_ty = box self.analyzer.rename_type_params(span, *ret_ty, None)?;
 
@@ -1243,6 +1244,7 @@ impl Fold<Type> for Expander<'_, '_, '_> {
                         type_params,
                         params,
                         ret_ty,
+                        properties,
                     }
                     .into();
                 }

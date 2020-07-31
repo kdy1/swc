@@ -145,6 +145,7 @@ impl Validate<Function> for Analyzer<'_, '_> {
                 params,
                 type_params,
                 ret_ty: box declared_ret_ty.unwrap_or_else(|| inferred_return_type),
+                properties: Vec::new(),
             }
             .into())
         })

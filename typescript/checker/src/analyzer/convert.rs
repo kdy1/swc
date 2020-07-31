@@ -424,6 +424,7 @@ impl Validate<TsFnType> for Analyzer<'_, '_> {
             type_params,
             params,
             ret_ty,
+            properties: Vec::new(),
         })
     }
 }

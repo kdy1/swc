@@ -77,7 +77,7 @@ impl Validate<AssignExpr> for Analyzer<'_, '_> {
         self.with_ctx(ctx).with(|a| {
             let span = e.span();
 
-            let any_span = match e.left {
+            let any_span = match &e.left {
                 PatOrExpr::Pat(box Pat::Ident(ref i)) | PatOrExpr::Expr(box Expr::Ident(ref i)) => {
                     // Type is any if self.declaring contains ident
                     if a.scope.declaring.contains(&i.into()) {
@@ -87,7 +87,33 @@ impl Validate<AssignExpr> for Analyzer<'_, '_> {
                     }
                 }
 
-                _ => None,
+                PatOrExpr::Pat(box Pat::Expr(box Expr::Member(MemberExpr {
+                    obj: ExprOrSuper::Expr(box Expr::Ident(funcname)),
+                    prop: box Expr::Ident(propname),
+                    ..
+                }))) => {
+                    a.append_stmts.push(Stmt::Decl(Decl::TsModule(TsModuleDecl {
+                        span,
+                        declare: true,
+                        global: false,
+                        id: TsModuleName::Ident(funcname.clone()),
+                        body: Some(TsNamespaceBody::TsModuleBlock(TsModuleBlock {
+                            span,
+                            body: vec![ModuleItem::Stmt(Stmt::Decl(Decl::Var(VarDecl {
+                                span: propname.span,
+                                kind: VarDeclKind::Var,
+                                declare: true,
+                                decls: vec![],
+                            })))],
+                        })),
+                    })));
+                    None
+                }
+
+                other => {
+                    println!("{:#?}", other);
+                    panic!()
+                }
             };
 
             e.left.visit_mut_with(a);
@@ -582,6 +608,7 @@ impl Analyzer<'_, '_> {
                                     type_params: m.type_params.clone(),
                                     params: m.params.clone(),
                                     ret_ty: box m.ret_ty.clone().unwrap_or_else(|| Type::any(span)),
+                                    properties: Vec::new(),
                                 }));
                                 continue;
                             }
@@ -1005,6 +1032,7 @@ impl Analyzer<'_, '_> {
                                             type_params: m.type_params.clone(),
                                             params: m.params.clone(),
                                             ret_ty: m.ret_ty.clone(),
+                                            properties: Vec::new(),
                                         }));
                                     }
                                 }
@@ -1083,6 +1111,28 @@ impl Analyzer<'_, '_> {
                 return Ok(*obj.obj_type.clone());
             }
 
+            Type::Function(function) => {
+                match type_mode {
+                    TypeOfMode::LValue => match prop {
+                        Expr::Lit(Lit::Str(_)) | Expr::Lit(Lit::Num(_)) | Expr::Ident(_) => {
+                            return Ok(Type::unknown(span))
+                        }
+                        _ => return Err(Error::TS7053 { span }),
+                    },
+                    TypeOfMode::RValue => {
+                        unimplemented!("Checking RValue of access_property of Type::Function")
+                    } /* {
+                       *     match prop {
+                       *         Expr::Lit(Str(s)) => {
+                       *             for m in function.properties {
+                       *                 if m.key
+                       *             }
+                       *         }
+                       *     }
+                       * } */
+                }
+            }
+
             _ => {}
         }
 
@@ -1128,6 +1178,7 @@ impl Analyzer<'_, '_> {
                         params: vec![],
                         ret_ty: box Type::any(span),
                         type_params: None,
+                        properties: Vec::new(),
                     }));
                 }
             },
@@ -1438,6 +1489,7 @@ impl Validate<ArrowExpr> for Analyzer<'_, '_> {
                 type_params,
                 ret_ty: box declared_ret_ty
                     .unwrap_or_else(|| inferred_return_type.unwrap_or_else(|| Type::any(f.span))),
+                properties: Vec::new(),
             })
         })
     }
