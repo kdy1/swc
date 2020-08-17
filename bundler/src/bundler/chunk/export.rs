@@ -357,8 +357,8 @@ struct ExportAliasInjecter {
 impl VisitMut for ExportAliasInjecter {
     fn visit_mut_export_named_specifier(&mut self, n: &mut ExportNamedSpecifier) {
         if n.exported.is_none() {
-            n.exported = Some(n.orig.clone());
-            n.orig.span = n.orig.span.with_ctxt(self.ctxt)
+            // n.exported = Some(n.orig.clone());
+            // n.orig.span = n.orig.span.with_ctxt(self.ctxt)
         }
     }
 
