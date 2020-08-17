@@ -61,6 +61,7 @@ where
                 target_ctxt: SyntaxContext::empty().apply_mark(info.mark()),
             });
             dep.visit_mut_with(&mut AliasExports {
+                var_ctxt: SyntaxContext::empty().apply_mark(info.mark()),
                 target_ctxt: SyntaxContext::empty().apply_mark(imported.mark()),
                 decls: Default::default(),
             });
@@ -278,6 +279,7 @@ impl VisitMut for NamedExportOrigMarker {
 
 struct AliasExports {
     target_ctxt: SyntaxContext,
+    var_ctxt: SyntaxContext,
     decls: Vec<VarDeclarator>,
 }
 
@@ -325,7 +327,7 @@ impl VisitMut for AliasExports {
                             span: ident.span,
                             name: Pat::Ident(Ident::new(
                                 ident.sym.clone(),
-                                ident.span.with_ctxt(self.target_ctxt),
+                                ident.span.with_ctxt(self.var_ctxt),
                             )),
                             init: Some(Box::new(Expr::Ident(ident))),
                             definite: false,
