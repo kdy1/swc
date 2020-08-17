@@ -45,11 +45,6 @@ where
             print_hygiene("entry:init", &self.cm, &entry);
             print_hygiene("dep:init", &self.cm, &dep);
 
-            entry.visit_mut_with(&mut ExportAliasInjecter {
-                ctxt: SyntaxContext::empty().apply_mark(info.mark()),
-            });
-            print_hygiene(&format!("entry:export-alias"), &self.cm, &entry);
-
             entry = entry.fold_with(&mut LocalMarker {
                 mark: imported.mark(),
                 specifiers,
@@ -62,8 +57,6 @@ where
                 target_ctxt: SyntaxContext::empty().apply_mark(info.mark()),
             });
 
-            print_hygiene("entry:NamedExportOrigMarker", &self.cm, &entry);
-
             dep.visit_mut_with(&mut UnexportAsVar {
                 target_ctxt: SyntaxContext::empty().apply_mark(info.mark()),
             });
@@ -74,11 +67,6 @@ where
             });
             dep = dep.fold_with(&mut Unexporter);
 
-            entry.visit_mut_with(&mut ExportRenamer {
-                from: SyntaxContext::empty().apply_mark(imported.mark()),
-                to: SyntaxContext::empty().apply_mark(info.mark()),
-            });
-
             print_hygiene("entry:before-injection", &self.cm, &entry);
             print_hygiene("dep:before-injection", &self.cm, &dep);
 
@@ -88,6 +76,11 @@ where
                 src: src.src.clone(),
             };
             entry.body.visit_mut_with(&mut injector);
+
+            entry.visit_mut_with(&mut ExportRenamer {
+                from: SyntaxContext::empty().apply_mark(imported.mark()),
+                to: SyntaxContext::empty().apply_mark(info.mark()),
+            });
 
             print_hygiene(
                 &format!(
@@ -344,21 +337,6 @@ impl VisitMut for AliasExports {
                 _ => {}
             },
             _ => {}
-        }
-    }
-
-    fn visit_mut_stmt(&mut self, _: &mut Stmt) {}
-}
-
-struct ExportAliasInjecter {
-    ctxt: SyntaxContext,
-}
-
-impl VisitMut for ExportAliasInjecter {
-    fn visit_mut_export_named_specifier(&mut self, n: &mut ExportNamedSpecifier) {
-        if n.exported.is_none() {
-            // n.exported = Some(n.orig.clone());
-            // n.orig.span = n.orig.span.with_ctxt(self.ctxt)
         }
     }
 
