@@ -45,11 +45,6 @@ where
             print_hygiene("entry:init", &self.cm, &entry);
             print_hygiene("dep:init", &self.cm, &dep);
 
-            entry.visit_mut_with(&mut ExportAliasInjecter {
-                ctxt: SyntaxContext::empty().apply_mark(info.mark()),
-            });
-            print_hygiene(&format!("entry:export-alias"), &self.cm, &entry);
-
             entry = entry.fold_with(&mut LocalMarker {
                 mark: imported.mark(),
                 specifiers,
@@ -344,21 +339,6 @@ impl VisitMut for AliasExports {
                 _ => {}
             },
             _ => {}
-        }
-    }
-
-    fn visit_mut_stmt(&mut self, _: &mut Stmt) {}
-}
-
-struct ExportAliasInjecter {
-    ctxt: SyntaxContext,
-}
-
-impl VisitMut for ExportAliasInjecter {
-    fn visit_mut_export_named_specifier(&mut self, n: &mut ExportNamedSpecifier) {
-        if n.exported.is_none() {
-            n.exported = Some(n.orig.clone());
-            n.orig.span = n.orig.span.with_ctxt(self.ctxt)
         }
     }
 
