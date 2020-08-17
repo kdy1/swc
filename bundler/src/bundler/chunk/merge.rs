@@ -663,6 +663,16 @@ impl Fold for LocalMarker<'_> {
         node.body = node.body.fold_with(&mut *f);
         node
     }
+
+    fn fold_export_named_specifier(&mut self, mut n: ExportNamedSpecifier) -> ExportNamedSpecifier {
+        // if n.exported.is_none() {
+        //     n.orig = n.orig.fold_with(self);
+        // }
+
+        n.exported = n.exported.fold_with(self);
+
+        n
+    }
 }
 
 struct Es6ModuleInjector {
