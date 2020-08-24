@@ -1,8 +1,8 @@
 use super::{Context, Input, Lexer};
-use crate::{input::Tokens, lexer::util::CharExt, token::*, JscTarget, Syntax};
+use crate::{error::Error, input::Tokens, lexer::util::CharExt, token::*, JscTarget, Syntax};
 use enum_kind::Kind;
 use log::trace;
-use std::mem;
+use std::{mem, mem::take};
 use swc_common::BytePos;
 
 /// State of lexer.
@@ -129,6 +129,14 @@ impl<I: Input> Tokens for Lexer<'_, I> {
     fn set_token_context(&mut self, c: TokenContexts) {
         self.state.context = c;
     }
+
+    fn add_error(&self, error: Error) {
+        self.errors.borrow_mut().push(error);
+    }
+
+    fn take_errors(&mut self) -> Vec<Error> {
+        take(&mut self.errors.borrow_mut())
+    }
 }
 
 impl<'a, I: Input> Iterator for Lexer<'a, I> {
@@ -154,15 +162,25 @@ impl<'a, I: Input> Iterator for Lexer<'a, I> {
 
             let c = match self.input.cur() {
                 Some(c) => c,
+                // End of input.
                 None => {
+                    // Treat last comments as trailing.
+
                     if self
                         .leading_comments_buffer
                         .as_ref()
-                        .map(|v| !v.is_empty())
+                        .map(|v| !v.borrow().is_empty())
                         .unwrap_or(false)
                     {
                         let last = self.state.prev_hi;
-                        for c in self.leading_comments_buffer.as_mut().unwrap().drain(..) {
+
+                        for c in self
+                            .leading_comments_buffer
+                            .as_ref()
+                            .map(|v| v.borrow_mut())
+                            .unwrap()
+                            .drain(..)
+                        {
                             self.comments.as_mut().unwrap().add_trailing(last, c);
                         }
                     }
@@ -241,11 +259,23 @@ impl<'a, I: Input> Iterator for Lexer<'a, I> {
         let span = self.span(start);
         if let Some(ref token) = token {
             if self.leading_comments_buffer.is_some()
-                && !self.leading_comments_buffer.as_ref().unwrap().is_empty()
+                && !self
+                    .leading_comments_buffer
+                    .as_ref()
+                    .unwrap()
+                    .borrow()
+                    .is_empty()
             {
-                self.comments.as_ref().unwrap().add_leading(
+                self.comments.as_ref().unwrap().add_leading_comments(
                     start,
-                    mem::replace(&mut self.leading_comments_buffer.as_mut().unwrap(), vec![]),
+                    mem::replace(
+                        &mut *self
+                            .leading_comments_buffer
+                            .as_ref()
+                            .map(|v| v.borrow_mut())
+                            .unwrap(),
+                        vec![],
+                    ),
                 );
             }
             self.state.update(start, &token);
@@ -399,7 +429,7 @@ impl State {
                         .before_expr()
                 }
 
-                Word(Word::Ident(ref ident)) => {
+                Word(Word::Ident(..)) => {
                     // variable declaration
                     match prev {
                         Some(prev) => match prev {
@@ -611,10 +641,10 @@ pub(crate) fn with_lexer<F, Ret>(
     f: F,
 ) -> Result<Ret, ::testing::StdErr>
 where
-    F: FnOnce(&mut Lexer<'_, crate::lexer::input::SourceFileInput<'_>>) -> Result<Ret, ()>,
+    F: FnOnce(&mut Lexer<'_, crate::lexer::input::StringInput<'_>>) -> Result<Ret, ()>,
 {
-    crate::with_test_sess(s, |sess, fm| {
-        let mut l = Lexer::new(sess, syntax, Default::default(), fm, None);
+    crate::with_test_sess(s, |_, fm| {
+        let mut l = Lexer::new(syntax, Default::default(), fm, None);
         let res = f(&mut l);
 
         let c = vec![TokenContext::BraceStmt];

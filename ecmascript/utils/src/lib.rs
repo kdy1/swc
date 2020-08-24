@@ -1,8 +1,3 @@
-#![feature(box_patterns)]
-#![feature(box_syntax)]
-#![feature(try_trait)]
-#![feature(specialization)]
-
 pub use self::{
     factory::ExprFactory,
     ident::{id, Id},
@@ -24,11 +19,9 @@ use std::{
     ops::Add,
 };
 use swc_atoms::{js_word, JsWord};
-use swc_common::{
-    comments::Comments, errors::Handler, Fold, FoldWith, Mark, Span, Spanned, Visit, VisitWith,
-    DUMMY_SP,
-};
+use swc_common::{errors::Handler, Mark, Span, Spanned, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_visit_type, Node, Visit, VisitMut, VisitMutWith, VisitWith};
 use unicode_xid::UnicodeXID;
 
 #[macro_use]
@@ -36,9 +29,6 @@ mod macros;
 pub mod constructor;
 mod factory;
 pub mod ident;
-pub mod load;
-pub mod options;
-pub mod resolve;
 mod value;
 pub mod var;
 
@@ -46,38 +36,32 @@ pub struct ThisVisitor {
     found: bool,
 }
 
-impl Visit<ThisExpr> for ThisVisitor {
-    fn visit(&mut self, _: &ThisExpr) {
+impl Visit for ThisVisitor {
+    noop_visit_type!();
+
+    /// Don't recurse into constructor
+    fn visit_constructor(&mut self, _: &Constructor, _: &dyn Node) {}
+
+    /// Don't recurse into fn
+    fn visit_fn_decl(&mut self, _: &FnDecl, _: &dyn Node) {}
+
+    /// Don't recurse into fn
+    fn visit_fn_expr(&mut self, _: &FnExpr, _: &dyn Node) {}
+
+    /// Don't recurse into fn
+    fn visit_function(&mut self, _: &Function, _: &dyn Node) {}
+
+    fn visit_this_expr(&mut self, _: &ThisExpr, _: &dyn Node) {
         self.found = true;
     }
 }
 
-impl Visit<FnExpr> for ThisVisitor {
-    /// Don't recurse into fn
-    fn visit(&mut self, _: &FnExpr) {}
-}
-
-impl Visit<Function> for ThisVisitor {
-    /// Don't recurse into fn
-    fn visit(&mut self, _: &Function) {}
-}
-
-impl Visit<Constructor> for ThisVisitor {
-    /// Don't recurse into constructor
-    fn visit(&mut self, _: &Constructor) {}
-}
-
-impl Visit<FnDecl> for ThisVisitor {
-    /// Don't recurse into fn
-    fn visit(&mut self, _: &FnDecl) {}
-}
-
 pub fn contains_this_expr<N>(body: &N) -> bool
 where
-    ThisVisitor: Visit<N>,
+    N: VisitWith<ThisVisitor>,
 {
     let mut visitor = ThisVisitor { found: false };
-    body.visit_with(&mut visitor);
+    body.visit_with(&Invalid { span: DUMMY_SP } as _, &mut visitor);
     visitor.found
 }
 
@@ -89,7 +73,7 @@ where
         found: false,
         ident,
     };
-    body.visit_with(&mut visitor);
+    body.visit_with(&Invalid { span: DUMMY_SP } as _, &mut visitor);
     visitor.found
 }
 
@@ -98,9 +82,11 @@ pub struct IdentFinder<'a> {
     found: bool,
 }
 
-impl Visit<Expr> for IdentFinder<'_> {
-    fn visit(&mut self, e: &Expr) {
-        e.visit_children(self);
+impl Visit for IdentFinder<'_> {
+    noop_visit_type!();
+
+    fn visit_expr(&mut self, e: &Expr, _: &dyn Node) {
+        e.visit_children_with(self);
 
         match *e {
             Expr::Ident(ref i)
@@ -224,7 +210,7 @@ impl<T> IsEmpty for Vec<T> {
 /// Extracts hoisted variables
 pub fn extract_var_ids<T: VisitWith<Hoister>>(node: &T) -> Vec<Ident> {
     let mut v = Hoister { vars: vec![] };
-    node.visit_with(&mut v);
+    node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
     v.vars
 }
 
@@ -288,36 +274,34 @@ pub struct Hoister {
     vars: Vec<Ident>,
 }
 
-impl Visit<VarDecl> for Hoister {
-    fn visit(&mut self, v: &VarDecl) {
-        if v.kind != VarDeclKind::Var {
-            return;
-        }
+impl Visit for Hoister {
+    noop_visit_type!();
 
-        v.visit_children(self)
+    fn visit_assign_expr(&mut self, node: &AssignExpr, _: &dyn Node) {
+        node.right.visit_children_with(self);
     }
-}
 
-impl Visit<AssignExpr> for Hoister {
-    fn visit(&mut self, node: &AssignExpr) {
-        node.right.visit_children(self);
-    }
-}
-
-impl Visit<Pat> for Hoister {
-    fn visit(&mut self, p: &Pat) {
-        p.visit_children(self);
+    fn visit_pat(&mut self, p: &Pat, _: &dyn Node) {
+        p.visit_children_with(self);
 
         match *p {
             Pat::Ident(ref i) => self.vars.push(i.clone()),
             _ => {}
         }
     }
+
+    fn visit_var_decl(&mut self, v: &VarDecl, _: &dyn Node) {
+        if v.kind != VarDeclKind::Var {
+            return;
+        }
+
+        v.visit_children_with(self)
+    }
 }
 
 /// Extension methods for [Expr].
 pub trait ExprExt {
-    fn as_expr_kind(&self) -> &Expr;
+    fn as_expr(&self) -> &Expr;
 
     /// Returns true if this is an immutable value.
     fn is_immutable_value(&self) -> bool {
@@ -329,7 +313,7 @@ pub trait ExprExt {
         //    be side-effected by other expressions.
         // This should only be used to say the value is immutable and
         // hasSideEffects and canBeSideEffected should be used for the other case.
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Lit(Lit::Bool(..))
             | Expr::Lit(Lit::Str(..))
             | Expr::Lit(Lit::Num(..))
@@ -365,21 +349,21 @@ pub trait ExprExt {
     }
 
     fn is_number(&self) -> bool {
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Lit(Lit::Num(..)) => true,
             _ => false,
         }
     }
 
     fn is_str(&self) -> bool {
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Lit(Lit::Str(..)) => true,
             _ => false,
         }
     }
 
     fn is_array_lit(&self) -> bool {
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Array(..) => true,
             _ => false,
         }
@@ -395,7 +379,7 @@ pub trait ExprExt {
     }
 
     fn is_void(&self) -> bool {
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Unary(UnaryExpr {
                 op: op!("void"), ..
             }) => true,
@@ -405,7 +389,7 @@ pub trait ExprExt {
 
     /// Is `self` an IdentifierReference to `id`?
     fn is_ident_ref_to(&self, id: JsWord) -> bool {
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Ident(Ident { ref sym, .. }) if *sym == id => true,
             _ => false,
         }
@@ -424,7 +408,7 @@ pub trait ExprExt {
     ///Note: unlike getPureBooleanValue this function does not return `None`
     ///for expressions with side-effects.
     fn as_bool(&self) -> (Purity, BoolValue) {
-        let expr = self.as_expr_kind();
+        let expr = self.as_expr();
         if expr.is_ident_ref_to(js_word!("undefined")) {
             return (Pure, Known(false));
         }
@@ -540,7 +524,7 @@ pub trait ExprExt {
 
     /// Emulates javascript Number() cast function.
     fn as_number(&self) -> Value<f64> {
-        let expr = self.as_expr_kind();
+        let expr = self.as_expr();
         let v = match *expr {
             Expr::Lit(ref l) => match *l {
                 Lit::Bool(Bool { value: true, .. }) => 1.0,
@@ -556,13 +540,18 @@ pub trait ExprExt {
             },
             Expr::Unary(UnaryExpr {
                 op: op!(unary, "-"),
-                arg:
-                    box Expr::Ident(Ident {
-                        sym: js_word!("Infinity"),
-                        ..
-                    }),
+                ref arg,
                 ..
-            }) => -INFINITY,
+            }) if match &**arg {
+                Expr::Ident(Ident {
+                    sym: js_word!("Infinity"),
+                    ..
+                }) => true,
+                _ => false,
+            } =>
+            {
+                -INFINITY
+            }
             Expr::Unary(UnaryExpr {
                 op: op!("!"),
                 ref arg,
@@ -590,7 +579,10 @@ pub trait ExprExt {
             }
 
             Expr::Tpl(..) | Expr::Object(ObjectLit { .. }) | Expr::Array(ArrayLit { .. }) => {
-                return num_from_str(&*self.as_string()?);
+                return num_from_str(&*match self.as_string() {
+                    Known(v) => v,
+                    Unknown => return Value::Unknown,
+                });
             }
 
             _ => return Unknown,
@@ -601,7 +593,7 @@ pub trait ExprExt {
 
     /// Returns Known only if it's pure.
     fn as_string(&self) -> Value<Cow<'_, str>> {
-        let expr = self.as_expr_kind();
+        let expr = self.as_expr();
         match *expr {
             Expr::Lit(ref l) => match *l {
                 Lit::Str(Str { ref value, .. }) => Known(Cow::Borrowed(value)),
@@ -612,9 +604,11 @@ pub trait ExprExt {
                 _ => Unknown,
             },
             Expr::Tpl(_) => {
+                Value::Unknown
                 // TODO:
-                // Only convert a template literal if all its expressions can be converted.
-                unimplemented!("TplLit.as_string()")
+                // Only convert a template literal if all its expressions can be
+                // converted. unimplemented!("TplLit.
+                // as_string()")
             }
             Expr::Ident(Ident { ref sym, .. }) => match *sym {
                 js_word!("undefined") | js_word!("Infinity") | js_word!("NaN") => {
@@ -629,15 +623,20 @@ pub trait ExprExt {
                 op: op!("!"),
                 ref arg,
                 ..
-            }) => Known(Cow::Borrowed(if arg.as_pure_bool()? {
-                "false"
-            } else {
-                "true"
+            }) => Known(Cow::Borrowed(match arg.as_pure_bool() {
+                Known(v) => {
+                    if v {
+                        "false"
+                    } else {
+                        "true"
+                    }
+                }
+                Unknown => return Value::Unknown,
             })),
             Expr::Array(ArrayLit { ref elems, .. }) => {
                 let mut first = true;
                 let mut buf = String::new();
-                // null, undefined is "" in array literl.
+                // null, undefined is "" in array literal.
                 for elem in elems {
                     let e = match *elem {
                         Some(ref elem) => match *elem {
@@ -647,7 +646,10 @@ pub trait ExprExt {
                                     sym: js_word!("undefined"),
                                     ..
                                 }) => Cow::Borrowed(""),
-                                _ => expr.as_string()?,
+                                _ => match expr.as_string() {
+                                    Known(v) => v,
+                                    Unknown => return Value::Unknown,
+                                },
                             },
                         },
                         None => Cow::Borrowed(""),
@@ -670,7 +672,7 @@ pub trait ExprExt {
     /// Apply the supplied predicate against all possible result Nodes of the
     /// expression.
     fn get_type(&self) -> Value<Type> {
-        let expr = self.as_expr_kind();
+        let expr = self.as_expr();
 
         match *expr {
             Expr::Assign(AssignExpr {
@@ -840,7 +842,7 @@ pub trait ExprExt {
             return true;
         }
 
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Member(MemberExpr {
                 obj: ExprOrSuper::Expr(ref obj),
                 ..
@@ -864,7 +866,7 @@ pub trait ExprExt {
             return false;
         }
 
-        match *self.as_expr_kind() {
+        match *self.as_expr() {
             Expr::Lit(..)
             | Expr::Ident(..)
             | Expr::This(..)
@@ -923,7 +925,7 @@ pub trait ExprExt {
             }
 
             Expr::Object(ObjectLit { ref props, .. }) => props.iter().any(|node| match node {
-                PropOrSpread::Prop(box node) => match *node {
+                PropOrSpread::Prop(node) => match &**node {
                     Prop::Shorthand(..) => false,
                     Prop::KeyValue(KeyValueProp { ref key, ref value }) => {
                         let k = match *key {
@@ -1008,13 +1010,13 @@ fn num_from_str(s: &str) -> Value<f64> {
 }
 
 impl ExprExt for Box<Expr> {
-    fn as_expr_kind(&self) -> &Expr {
+    fn as_expr(&self) -> &Expr {
         &self
     }
 }
 
 impl ExprExt for Expr {
-    fn as_expr_kind(&self) -> &Expr {
+    fn as_expr(&self) -> &Expr {
         &self
     }
 }
@@ -1088,7 +1090,7 @@ pub fn to_int32(d: f64) -> i32 {
 
 pub fn has_rest_pat<T: VisitWith<RestPatVisitor>>(node: &T) -> bool {
     let mut v = RestPatVisitor { found: false };
-    node.visit_with(&mut v);
+    node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
     v.found
 }
 
@@ -1096,8 +1098,10 @@ pub struct RestPatVisitor {
     found: bool,
 }
 
-impl Visit<RestPat> for RestPatVisitor {
-    fn visit(&mut self, _: &RestPat) {
+impl Visit for RestPatVisitor {
+    noop_visit_type!();
+
+    fn visit_rest_pat(&mut self, _: &RestPat, _: &dyn Node) {
         self.found = true;
     }
 }
@@ -1120,7 +1124,7 @@ where
         cost: 0,
         allow_non_json_value,
     };
-    e.visit_with(&mut v);
+    e.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
 
     (v.is_lit, v.cost)
 }
@@ -1131,60 +1135,54 @@ pub struct LiteralVisitor {
     allow_non_json_value: bool,
 }
 
-macro_rules! not_lit {
-    ($T:ty) => {
-        impl Visit<$T> for LiteralVisitor {
-            fn visit(&mut self, _: &$T) {
+impl Visit for LiteralVisitor {
+    noop_visit_type!();
+
+    fn visit_array_lit(&mut self, e: &ArrayLit, _: &dyn Node) {
+        if !self.is_lit {
+            return;
+        }
+
+        self.cost += 2 + e.elems.len();
+
+        e.visit_children_with(self);
+
+        for elem in &e.elems {
+            if !self.allow_non_json_value && elem.is_none() {
                 self.is_lit = false;
             }
         }
-    };
-}
+    }
 
-not_lit!(ThisExpr);
-not_lit!(FnExpr);
-not_lit!(UnaryExpr);
-not_lit!(UpdateExpr);
-not_lit!(AssignExpr);
-not_lit!(MemberExpr);
-not_lit!(CondExpr);
-not_lit!(CallExpr);
-not_lit!(NewExpr);
-not_lit!(SeqExpr);
-not_lit!(TaggedTpl);
-not_lit!(ArrowExpr);
-not_lit!(ClassExpr);
-not_lit!(YieldExpr);
-not_lit!(MetaPropExpr);
-not_lit!(AwaitExpr);
+    fn visit_arrow_expr(&mut self, _: &ArrowExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
 
-// TODO:
-not_lit!(BinExpr);
+    fn visit_assign_expr(&mut self, _: &AssignExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
 
-not_lit!(JSXMemberExpr);
-not_lit!(JSXNamespacedName);
-not_lit!(JSXEmptyExpr);
-not_lit!(JSXElement);
-not_lit!(JSXFragment);
+    fn visit_await_expr(&mut self, _: &AwaitExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
 
-// TODO: TsTypeCastExpr,
-// TODO: TsAsExpr,
+    fn visit_bin_expr(&mut self, _: &BinExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
 
-// TODO: ?
-not_lit!(TsNonNullExpr);
-// TODO: ?
-not_lit!(TsTypeAssertion);
-// TODO: ?
-not_lit!(TsConstAssertion);
+    fn visit_call_expr(&mut self, _: &CallExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
 
-not_lit!(PrivateName);
-not_lit!(OptChainExpr);
+    fn visit_class_expr(&mut self, _: &ClassExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
 
-not_lit!(SpreadElement);
-not_lit!(Invalid);
+    fn visit_cond_expr(&mut self, _: &CondExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
 
-impl Visit<Expr> for LiteralVisitor {
-    fn visit(&mut self, e: &Expr) {
+    fn visit_expr(&mut self, e: &Expr, _: &dyn Node) {
         if !self.is_lit {
             return;
         }
@@ -1192,18 +1190,70 @@ impl Visit<Expr> for LiteralVisitor {
         match *e {
             Expr::Ident(..) | Expr::Lit(Lit::Regex(..)) => self.is_lit = false,
             Expr::Tpl(ref tpl) if !tpl.exprs.is_empty() => self.is_lit = false,
-            _ => e.visit_children(self),
+            _ => e.visit_children_with(self),
         }
     }
-}
 
-impl Visit<Prop> for LiteralVisitor {
-    fn visit(&mut self, p: &Prop) {
+    fn visit_fn_expr(&mut self, _: &FnExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_invalid(&mut self, _: &Invalid, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_jsx_element(&mut self, _: &JSXElement, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_jsx_empty_expr(&mut self, _: &JSXEmptyExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_jsx_fragment(&mut self, _: &JSXFragment, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_jsx_member_expr(&mut self, _: &JSXMemberExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_jsx_namespaced_name(&mut self, _: &JSXNamespacedName, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_member_expr(&mut self, _: &MemberExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_meta_prop_expr(&mut self, _: &MetaPropExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_new_expr(&mut self, _: &NewExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_number(&mut self, node: &Number, _: &dyn Node) {
+        if !self.allow_non_json_value && node.value.is_infinite() {
+            self.is_lit = false;
+        }
+    }
+
+    fn visit_opt_chain_expr(&mut self, _: &OptChainExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_private_name(&mut self, _: &PrivateName, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_prop(&mut self, p: &Prop, _: &dyn Node) {
         if !self.is_lit {
             return;
         }
 
-        p.visit_children(self);
+        p.visit_children_with(self);
 
         match p {
             Prop::KeyValue(..) => {
@@ -1212,15 +1262,13 @@ impl Visit<Prop> for LiteralVisitor {
             _ => self.is_lit = false,
         }
     }
-}
 
-impl Visit<PropName> for LiteralVisitor {
-    fn visit(&mut self, node: &PropName) {
+    fn visit_prop_name(&mut self, node: &PropName, _: &dyn Node) {
         if !self.is_lit {
             return;
         }
 
-        node.visit_children(self);
+        node.visit_children_with(self);
 
         match node {
             PropName::Str(ref s) => self.cost += 2 + s.value.len(),
@@ -1236,31 +1284,41 @@ impl Visit<PropName> for LiteralVisitor {
             PropName::Computed(..) => self.is_lit = false,
         }
     }
-}
 
-impl Visit<ArrayLit> for LiteralVisitor {
-    fn visit(&mut self, e: &ArrayLit) {
-        if !self.is_lit {
-            return;
-        }
-
-        self.cost += 2 + e.elems.len();
-
-        e.visit_children(self);
-
-        for elem in &e.elems {
-            if !self.allow_non_json_value && elem.is_none() {
-                self.is_lit = false;
-            }
-        }
+    fn visit_seq_expr(&mut self, _: &SeqExpr, _parent: &dyn Node) {
+        self.is_lit = false
     }
-}
 
-impl Visit<Number> for LiteralVisitor {
-    fn visit(&mut self, node: &Number) {
-        if !self.allow_non_json_value && node.value.is_infinite() {
-            self.is_lit = false;
-        }
+    fn visit_spread_element(&mut self, _: &SpreadElement, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_tagged_tpl(&mut self, _: &TaggedTpl, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_this_expr(&mut self, _: &ThisExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_ts_const_assertion(&mut self, _: &TsConstAssertion, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_ts_non_null_expr(&mut self, _: &TsNonNullExpr, _parent: &dyn Node) {
+        self.is_lit = false
+    }
+
+    fn visit_unary_expr(&mut self, _: &UnaryExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_update_expr(&mut self, _: &UpdateExpr, _parent: &dyn Node) {
+        self.is_lit = false;
+    }
+
+    fn visit_yield_expr(&mut self, _: &YieldExpr, _parent: &dyn Node) {
+        self.is_lit = false
     }
 }
 
@@ -1327,7 +1385,7 @@ pub fn default_constructor(has_super: bool) -> Constructor {
                 pat: Pat::Rest(RestPat {
                     span: DUMMY_SP,
                     dot3_token: DUMMY_SP,
-                    arg: box Pat::Ident(quote_ident!(span, "args")),
+                    arg: Box::new(Pat::Ident(quote_ident!(span, "args"))),
                     type_ann: Default::default(),
                 }),
             })]
@@ -1342,7 +1400,7 @@ pub fn default_constructor(has_super: bool) -> Constructor {
                     callee: ExprOrSuper::Super(Super { span: DUMMY_SP }),
                     args: vec![ExprOrSpread {
                         spread: Some(DUMMY_SP),
-                        expr: box Expr::Ident(quote_ident!(span, "args")),
+                        expr: Box::new(Expr::Ident(quote_ident!(span, "args"))),
                     }],
                     type_args: Default::default(),
                 }
@@ -1356,26 +1414,27 @@ pub fn default_constructor(has_super: bool) -> Constructor {
 
 /// Check if `e` is `...arguments`
 pub fn is_rest_arguments(e: &ExprOrSpread) -> bool {
-    match *e {
-        ExprOrSpread {
-            spread: Some(..),
-            expr:
-                box Expr::Ident(Ident {
-                    sym: js_word!("arguments"),
-                    ..
-                }),
-        } => true,
+    if e.spread.is_none() {
+        return false;
+    }
+
+    match *e.expr {
+        Expr::Ident(Ident {
+            sym: js_word!("arguments"),
+            ..
+        }) => true,
         _ => false,
     }
 }
 
 #[inline]
 pub fn undefined(span: Span) -> Box<Expr> {
-    box Expr::Unary(UnaryExpr {
+    Expr::Unary(UnaryExpr {
         span,
         op: op!("void"),
-        arg: box Expr::Lit(Lit::Num(Number { value: 0.0, span })),
+        arg: Expr::Lit(Lit::Num(Number { value: 0.0, span })).into(),
     })
+    .into()
 }
 
 /// inject `branch` after directives
@@ -1384,10 +1443,14 @@ pub fn prepend<T: StmtLike>(stmts: &mut Vec<T>, stmt: T) {
     let idx = stmts
         .iter()
         .position(|item| match item.as_stmt() {
-            Some(&Stmt::Expr(ExprStmt {
-                expr: box Expr::Lit(Lit::Str(..)),
-                ..
-            })) => false,
+            Some(&Stmt::Expr(ExprStmt { ref expr, .. }))
+                if match &**expr {
+                    Expr::Lit(Lit::Str(..)) => true,
+                    _ => false,
+                } =>
+            {
+                false
+            }
             _ => true,
         })
         .unwrap_or(stmts.len());
@@ -1402,12 +1465,20 @@ pub fn prepend_stmts<T: StmtLike>(
 ) {
     let idx = to
         .iter()
-        .position(|item| match item.as_stmt() {
-            Some(&Stmt::Expr(ExprStmt {
-                expr: box Expr::Lit(Lit::Str(..)),
-                ..
-            })) => false,
-            _ => true,
+        .position(|item| {
+            match item.as_stmt() {
+                Some(&Stmt::Expr(ExprStmt { ref expr, .. })) => match &**expr {
+                    Expr::Lit(Lit::Str(..)) => return false,
+                    Expr::Call(expr) => match expr.callee {
+                        ExprOrSuper::Super(_) => return false,
+                        ExprOrSuper::Expr(_) => {}
+                    },
+                    _ => {}
+                },
+                _ => {}
+            }
+
+            true
         })
         .unwrap_or(to.len());
 
@@ -1476,26 +1547,24 @@ where
 
     {
         let mut v = DestructuringFinder { found: &mut found };
-        node.visit_with(&mut v);
+        node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
     }
 
     found
 }
 
-impl<'a, I: IdentLike> Visit<Expr> for DestructuringFinder<'a, I> {
-    /// No-op (we don't care about expressions)
-    fn visit(&mut self, _: &Expr) {}
-}
+impl<'a, I: IdentLike> Visit for DestructuringFinder<'a, I> {
+    noop_visit_type!();
 
-impl<'a, I: IdentLike> Visit<PropName> for DestructuringFinder<'a, I> {
     /// No-op (we don't care about expressions)
-    fn visit(&mut self, _: &PropName) {}
-}
+    fn visit_expr(&mut self, _: &Expr, _: &dyn Node) {}
 
-impl<'a, I: IdentLike> Visit<Ident> for DestructuringFinder<'a, I> {
-    fn visit(&mut self, i: &Ident) {
+    fn visit_ident(&mut self, i: &Ident, _: &dyn Node) {
         self.found.push(I::from_ident(i));
     }
+
+    /// No-op (we don't care about expressions)
+    fn visit_prop_name(&mut self, _: &PropName, _: &dyn Node) {}
 }
 
 pub fn is_valid_ident(s: &JsWord) -> bool {
@@ -1506,17 +1575,26 @@ pub fn is_valid_ident(s: &JsWord) -> bool {
     UnicodeXID::is_xid_start(first) && s.chars().skip(1).all(UnicodeXID::is_xid_continue)
 }
 
-pub fn drop_span<T>(t: T) -> T
+pub fn drop_span<T>(mut t: T) -> T
 where
-    T: FoldWith<DropSpan>,
+    T: VisitMutWith<DropSpan>,
 {
-    t.fold_with(&mut DropSpan)
+    t.visit_mut_with(&mut DropSpan {
+        preserve_ctxt: false,
+    });
+    t
 }
 
-pub struct DropSpan;
-impl Fold<Span> for DropSpan {
-    fn fold(&mut self, _: Span) -> Span {
-        DUMMY_SP
+pub struct DropSpan {
+    pub preserve_ctxt: bool,
+}
+impl VisitMut for DropSpan {
+    fn visit_mut_span(&mut self, span: &mut Span) {
+        *span = if self.preserve_ctxt {
+            DUMMY_SP.with_ctxt(span.ctxt())
+        } else {
+            DUMMY_SP
+        };
     }
 }
 
@@ -1526,20 +1604,20 @@ pub struct UsageFinder<'a> {
     found: bool,
 }
 
-impl<'a> Visit<MemberExpr> for UsageFinder<'a> {
-    fn visit(&mut self, e: &MemberExpr) {
-        e.obj.visit_with(self);
+impl<'a> Visit for UsageFinder<'a> {
+    noop_visit_type!();
 
-        if e.computed {
-            e.prop.visit_with(self);
-        }
-    }
-}
-
-impl<'a> Visit<Ident> for UsageFinder<'a> {
-    fn visit(&mut self, i: &Ident) {
+    fn visit_ident(&mut self, i: &Ident, _: &dyn Node) {
         if i.span.ctxt() == self.ident.span.ctxt() && i.sym == self.ident.sym {
             self.found = true;
+        }
+    }
+
+    fn visit_member_expr(&mut self, e: &MemberExpr, _: &dyn Node) {
+        e.obj.visit_with(e as _, self);
+
+        if e.computed {
+            e.prop.visit_with(e as _, self);
         }
     }
 }
@@ -1553,13 +1631,13 @@ impl<'a> UsageFinder<'a> {
             ident,
             found: false,
         };
-        node.visit_with(&mut v);
+        node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
         v.found
     }
 }
 
+// Used for error reporting in transform.
 scoped_thread_local!(pub static HANDLER: Handler);
-scoped_thread_local!(pub static COMMENTS: Comments);
 
 /// make a new expression which evaluates `val` preserving side effects, if any.
 pub fn preserve_effects<I>(span: Span, val: Expr, exprs: I) -> Expr
@@ -1569,7 +1647,8 @@ where
     /// Add side effects of `expr` to `v`
     /// preserving order and conditions. (think a() ? yield b() : c())
     #[allow(clippy::vec_box)]
-    fn add_effects(v: &mut Vec<Box<Expr>>, box expr: Box<Expr>) {
+    fn add_effects(v: &mut Vec<Box<Expr>>, expr: Box<Expr>) {
+        let expr = *expr;
         match expr {
             Expr::Lit(..)
             | Expr::This(..)
@@ -1579,23 +1658,32 @@ where
             | Expr::PrivateName(..) => {}
 
             // In most case, we can do nothing for this.
-            Expr::Update(_) | Expr::Assign(_) | Expr::Yield(_) | Expr::Await(_) => v.push(box expr),
+            Expr::Update(_) | Expr::Assign(_) | Expr::Yield(_) | Expr::Await(_) => {
+                v.push(Box::new(expr))
+            }
 
             // TODO
-            Expr::MetaProp(_) => v.push(box expr),
+            Expr::MetaProp(_) => v.push(Box::new(expr)),
 
-            Expr::Call(_) => v.push(box expr),
-            Expr::New(NewExpr {
-                callee: box Expr::Ident(Ident { ref sym, .. }),
-                ref args,
-                ..
-            }) if *sym == js_word!("Date") && args.is_empty() => {}
-            Expr::New(_) => v.push(box expr),
-            Expr::Member(_) => v.push(box expr),
+            Expr::Call(_) => v.push(Box::new(expr)),
+            Expr::New(e) => {
+                // Known constructors
+                match *e.callee {
+                    Expr::Ident(Ident { ref sym, .. }) => {
+                        if *sym == js_word!("Date") && e.args.is_empty() {
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+
+                v.push(Box::new(Expr::New(e)))
+            }
+            Expr::Member(_) => v.push(Box::new(expr)),
 
             // We are at here because we could not determine value of test.
             //TODO: Drop values if it does not have side effects.
-            Expr::Cond(_) => v.push(box expr),
+            Expr::Cond(_) => v.push(Box::new(expr)),
 
             Expr::Unary(UnaryExpr { arg, .. }) => add_effects(v, arg),
             Expr::Bin(BinExpr { left, right, .. }) => {
@@ -1612,7 +1700,7 @@ where
                 //
                 let mut has_spread = false;
                 props.retain(|node| match node {
-                    PropOrSpread::Prop(box node) => match node {
+                    PropOrSpread::Prop(node) => match &**node {
                         Prop::Shorthand(..) => false,
                         Prop::KeyValue(KeyValueProp { key, value }) => {
                             if let PropName::Computed(e) = key {
@@ -1643,10 +1731,10 @@ where
                 });
 
                 if has_spread {
-                    v.push(box Expr::Object(ObjectLit { span, props }))
+                    v.push(Box::new(Expr::Object(ObjectLit { span, props })))
                 } else {
                     props.into_iter().for_each(|prop| match prop {
-                        PropOrSpread::Prop(box node) => match node {
+                        PropOrSpread::Prop(node) => match *node {
                             Prop::Shorthand(..) => {}
                             Prop::KeyValue(KeyValueProp { key, value }) => {
                                 if let PropName::Computed(e) = key {
@@ -1708,7 +1796,7 @@ where
     if exprs.is_empty() {
         val
     } else {
-        exprs.push(box val);
+        exprs.push(Box::new(val));
 
         Expr::Seq(SeqExpr { exprs, span })
     }

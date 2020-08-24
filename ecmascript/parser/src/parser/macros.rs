@@ -1,7 +1,17 @@
 macro_rules! unexpected {
-    ($p:expr) => {{
-        let got = format!("{:?}", cur!($p, false).ok());
-        syntax_error!($p, $p.input.cur_span(), SyntaxError::Unexpected { got })
+    ($p:expr, $expected:literal) => {{
+        let got = match $p.input.cur() {
+            Some(v) => format!("{:?}", v),
+            None => format!("<eof>"),
+        };
+        syntax_error!(
+            $p,
+            $p.input.cur_span(),
+            SyntaxError::Unexpected {
+                got,
+                expected: $expected
+            }
+        )
     }};
 }
 
@@ -33,14 +43,14 @@ macro_rules! is {
     }};
 
     ($p:expr,';') => {{
-        $p.input.is(&Token::Semi)
-            || eof!($p)
-            || is!($p, '}')
-            || $p.input.had_line_break_before_cur()
+        match $p.input.cur() {
+            Some(&Token::Semi) | None | Some(&tok!('}')) => true,
+            _ => $p.input.had_line_break_before_cur(),
+        }
     }};
 
     ($p:expr, $t:tt) => {
-        $p.input.is(&tok!($t))
+        is_exact!($p, $t)
     };
 }
 
@@ -73,7 +83,10 @@ macro_rules! peeked_is {
     }};
 
     ($p:expr, $t:tt) => {
-        $p.input.peeked_is(&tok!($t))
+        match peek!($p).ok() {
+            Some(&token_including_semi!($t)) => true,
+            _ => false,
+        }
     };
 }
 
@@ -97,7 +110,7 @@ macro_rules! is_one_of {
 macro_rules! assert_and_bump {
     ($p:expr, $t:tt) => {{
         const TOKEN: &Token = &tok!($t);
-        if cfg!(debug_assertions) && !$p.input.is(TOKEN) {
+        if cfg!(debug_assertions) && !is!($p, $t) {
             unreachable!(
                 "assertion failed: expected {:?}, got {:?}",
                 TOKEN,
@@ -115,11 +128,15 @@ macro_rules! assert_and_bump {
 ///     if token has data like string.
 macro_rules! eat {
     ($p:expr, ';') => {{
-        log::trace!("eat(';'): cur={:?}", cur!($p, true));
-        $p.input.eat(&Token::Semi)
-            || eof!($p)
-            || is!($p, '}')
-            || $p.input.had_line_break_before_cur()
+        log::trace!("eat(';'): cur={:?}", cur!($p, false));
+        match $p.input.cur() {
+            Some(&Token::Semi) => {
+                $p.input.bump();
+                true
+            }
+            None | Some(&tok!('}')) => true,
+            _ => $p.input.had_line_break_before_cur(),
+        }
     }};
 
     ($p:expr, $t:tt) => {{
@@ -134,8 +151,7 @@ macro_rules! eat {
 
 macro_rules! eat_exact {
     ($p:expr, $t:tt) => {{
-        const TOKEN: &Token = &token_including_semi!($t);
-        if $p.input.is(TOKEN) {
+        if is_exact!($p, $t) {
             bump!($p);
             true
         } else {
@@ -146,8 +162,10 @@ macro_rules! eat_exact {
 
 macro_rules! is_exact {
     ($p:expr, $t:tt) => {{
-        const TOKEN: &Token = &token_including_semi!($t);
-        $p.input.is(TOKEN)
+        match $p.input.cur() {
+            Some(&token_including_semi!($t)) => true,
+            _ => false,
+        }
     }};
 }
 
@@ -156,7 +174,10 @@ macro_rules! expect {
     ($p:expr, $t:tt) => {{
         const TOKEN: &Token = &token_including_semi!($t);
         if !eat!($p, $t) {
-            let cur = format!("{:?}", cur!($p, false).ok());
+            let cur = match $p.input.cur() {
+                Some(v) => format!("{:?}", v),
+                None => format!("<eof>"),
+            };
             syntax_error!($p, $p.input.cur_span(), SyntaxError::Expected(TOKEN, cur))
         }
     }};
@@ -166,7 +187,10 @@ macro_rules! expect_exact {
     ($p:expr, $t:tt) => {{
         const TOKEN: &Token = &token_including_semi!($t);
         if !eat_exact!($p, $t) {
-            let cur = format!("{:?}", cur!($p, false).ok());
+            let cur = match $p.input.cur() {
+                Some(v) => format!("{:?}", v),
+                None => format!("<eof>"),
+            };
             syntax_error!($p, $p.input.cur_span(), SyntaxError::Expected(TOKEN, cur))
         }
     }};
@@ -192,13 +216,7 @@ macro_rules! cur {
         if is_err_token {
             match $p.input.bump() {
                 $crate::token::Token::Error(e) => {
-                    let err =
-                        ::swc_common::errors::DiagnosticBuilder::from($crate::error::ErrorToDiag {
-                            handler: &$p.session.handler,
-                            span: e.span,
-                            error: e.error,
-                        });
-                    return Err(err.into());
+                    return Err(e);
                 }
                 _ => unreachable!(),
             }
@@ -208,15 +226,13 @@ macro_rules! cur {
             Some(c) => Ok(c),
             None => {
                 if $required {
-                    let err = ::swc_common::errors::DiagnosticBuilder::from($crate::error::Eof {
-                        last,
-                        handler: &$p.session.handler,
-                    });
-                    return Err(err.into());
+                    let err = crate::error::Error {
+                        error: Box::new((last, crate::error::SyntaxError::Eof)),
+                    };
+                    return Err(err);
                 }
-                Err($crate::error::Eof {
-                    last,
-                    handler: &$p.session.handler,
+                Err(crate::error::Error {
+                    error: Box::new((last, crate::error::SyntaxError::Eof)),
                 })
             }
         }
@@ -237,11 +253,9 @@ Current token is {:?}",
         match $p.input.peek() {
             Some(c) => Ok(c),
             None => {
-                let err = ::swc_common::errors::DiagnosticBuilder::from($crate::error::Eof {
-                    //TODO: Use whole span
-                    last,
-                    handler: &$p.session.handler,
-                });
+                let err = crate::error::Error {
+                    error: Box::new((last, crate::error::SyntaxError::Eof)),
+                };
                 Err(err)
             }
         }
@@ -312,11 +326,9 @@ macro_rules! span {
 
 macro_rules! make_error {
     ($p:expr, $span:expr, $err:expr) => {{
-        ::swc_common::errors::DiagnosticBuilder::from($crate::error::ErrorToDiag {
-            handler: $p.session.handler,
-            span: $span,
-            error: $err,
-        })
+        crate::error::Error {
+            error: Box::new(($span, $err)),
+        }
     }};
 }
 

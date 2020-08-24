@@ -9,7 +9,9 @@ use self::{
 };
 use std::{borrow::Cow, fmt::Write, io, sync::Arc};
 use swc_atoms::JsWord;
-use swc_common::{comments::Comments, BytePos, SourceMap, Span, Spanned, SyntaxContext, DUMMY_SP};
+use swc_common::{
+    comments::Comments, sync::Lrc, BytePos, SourceMap, Span, Spanned, SyntaxContext, DUMMY_SP,
+};
 use swc_ecma_ast::*;
 use swc_ecma_codegen_macros::emitter;
 
@@ -30,11 +32,6 @@ pub mod util;
 
 pub type Result = io::Result<()>;
 
-pub trait Handlers {
-    // fn on_before_emit_token(&mut self, _node: &Any) {}
-    // fn on_after_emit_token(&mut self, _node: &Any) {}
-}
-
 pub trait Node: Spanned {
     fn emit_with(&self, e: &mut Emitter<'_>) -> Result;
 }
@@ -53,10 +50,9 @@ impl<'a, N: Node> Node for &'a N {
 
 pub struct Emitter<'a> {
     pub cfg: config::Config,
-    pub cm: Arc<SourceMap>,
-    pub comments: Option<&'a Comments>,
+    pub cm: Lrc<SourceMap>,
+    pub comments: Option<&'a dyn Comments>,
     pub wr: Box<(dyn 'a + WriteJs)>,
-    pub handlers: Box<(dyn 'a + Handlers)>,
 }
 
 impl<'a> Emitter<'a> {
@@ -234,11 +230,20 @@ impl<'a> Emitter<'a> {
             ExportSpecifier::Default(ref node) => {
                 unimplemented!("codegen of `export default from 'foo';`")
             }
-            ExportSpecifier::Namespace(ref node) => {
-                unimplemented!("codegen of `export foo as Foo from 'foo';`")
-            }
+            ExportSpecifier::Namespace(ref node) => emit!(node),
             ExportSpecifier::Named(ref node) => emit!(node),
         }
+    }
+
+    #[emitter]
+    fn emit_namespace_export_specifier(&mut self, node: &ExportNamespaceSpecifier) -> Result {
+        self.emit_leading_comments_of_pos(node.span().lo())?;
+
+        punct!("*");
+        formatting_space!();
+        keyword!("as");
+        space!();
+        emit!(node.name);
     }
 
     #[emitter]
@@ -260,22 +265,71 @@ impl<'a> Emitter<'a> {
     fn emit_named_export(&mut self, node: &NamedExport) -> Result {
         self.emit_leading_comments_of_pos(node.span().lo())?;
 
+        struct Specifiers<'a> {
+            has_namespace_spec: bool,
+            namespace_spec: Option<&'a ExportNamespaceSpecifier>,
+            has_named_specs: bool,
+            named_specs: Vec<&'a ExportSpecifier>,
+        }
+        let Specifiers {
+            has_namespace_spec,
+            namespace_spec,
+            has_named_specs,
+            named_specs,
+        } = node.specifiers.iter().fold(
+            Specifiers {
+                has_namespace_spec: false,
+                namespace_spec: None,
+                has_named_specs: false,
+                named_specs: vec![],
+            },
+            |mut result, s| match s {
+                ExportSpecifier::Namespace(spec) => {
+                    result.has_namespace_spec = true;
+                    // There can only be one namespace export specifier.
+                    if let None = result.namespace_spec {
+                        result.namespace_spec = Some(spec)
+                    }
+                    result
+                }
+                spec => {
+                    result.has_named_specs = true;
+                    result.named_specs.push(spec);
+                    result
+                }
+            },
+        );
+
         keyword!("export");
         formatting_space!();
-        punct!("{");
-        self.emit_list(
-            node.span,
-            Some(&node.specifiers),
-            ListFormat::NamedImportsOrExportsElements,
-        )?;
-        // TODO:
-        punct!("}");
-        if let Some(ref src) = node.src {
-            space!();
-            keyword!("from");
-            emit!(src);
-            semi!();
+        if let Some(spec) = namespace_spec {
+            emit!(spec);
+            if has_named_specs {
+                punct!(",");
+                formatting_space!();
+            }
         }
+        if has_named_specs || (!has_namespace_spec && !has_named_specs) {
+            punct!("{");
+            self.emit_list(
+                node.span,
+                Some(&named_specs),
+                ListFormat::NamedImportsOrExportsElements,
+            )?;
+            punct!("}");
+        }
+
+        if let Some(ref src) = node.src {
+            if has_named_specs || (!has_namespace_spec && !has_named_specs) {
+                formatting_space!();
+            } else if has_namespace_spec {
+                space!();
+            }
+            keyword!("from");
+            formatting_space!();
+            emit!(src);
+        }
+        semi!();
     }
 
     #[emitter]
@@ -328,6 +382,12 @@ impl<'a> Emitter<'a> {
     fn emit_str_lit(&mut self, node: &Str) -> Result {
         self.emit_leading_comments_of_pos(node.span().lo())?;
 
+        let single_quote = if let Ok(s) = self.cm.span_to_snippet(node.span) {
+            s.starts_with("'")
+        } else {
+            true
+        };
+
         // if let Some(s) = get_text_of_node(&self.cm, node, false) {
         //     self.wr.write_str_lit(node.span, &s)?;
         //     return Ok(());
@@ -335,19 +395,16 @@ impl<'a> Emitter<'a> {
         let value = escape(&node.value);
         // let value = node.value.replace("\n", "\\n");
 
-        if !node.value.contains('\'') {
-            punct!("'");
-            self.wr.write_str_lit(node.span, &value)?;
-            punct!("'");
-        } else if !node.value.contains('\"') {
-            punct!("\"");
-            self.wr.write_str_lit(node.span, &value)?;
-            punct!("\"");
-        } else {
+        if single_quote {
             punct!("'");
             self.wr
                 .write_str_lit(node.span, &value.replace("'", "\\'"))?;
             punct!("'");
+        } else {
+            punct!("\"");
+            self.wr
+                .write_str_lit(node.span, &value.replace("\"", "\\\""))?;
+            punct!("\"");
         }
     }
 
@@ -512,6 +569,10 @@ impl<'a> Emitter<'a> {
         keyword!("new");
         space!();
         emit!(node.callee);
+
+        if let Some(type_args) = &node.type_args {
+            emit!(type_args);
+        }
 
         if let Some(ref args) = node.args {
             punct!("(");
@@ -722,6 +783,7 @@ impl<'a> Emitter<'a> {
             ClassMember::PrivateMethod(ref n) => emit!(n),
             ClassMember::PrivateProp(ref n) => emit!(n),
             ClassMember::TsIndexSignature(ref n) => emit!(n),
+            ClassMember::Empty(ref n) => emit!(n),
         }
     }
 
@@ -835,7 +897,28 @@ impl<'a> Emitter<'a> {
     fn emit_private_prop(&mut self, n: &PrivateProp) -> Result {
         self.emit_leading_comments_of_pos(n.span().lo())?;
 
-        unimplemented!("emit_private_prop")
+        self.emit_list(n.span, Some(&n.decorators), ListFormat::Decorators)?;
+
+        self.emit_accesibility(n.accessibility)?;
+
+        if n.readonly {
+            keyword!("readonly");
+            space!();
+        }
+
+        emit!(n.key);
+        if let Some(type_ann) = &n.type_ann {
+            punct!(":");
+            space!();
+            emit!(type_ann);
+        }
+
+        if let Some(value) = &n.value {
+            punct!("=");
+            emit!(value);
+        }
+
+        semi!();
     }
 
     #[emitter]
@@ -1295,6 +1378,9 @@ impl<'a> Emitter<'a> {
         } else {
             // TODO: span
             self.wr.write_symbol(ident.span, &ident.sym)?;
+            if ident.optional {
+                punct!("?");
+            }
 
             if let Some(ty) = &ident.type_ann {
                 punct!(":");
@@ -1343,10 +1429,6 @@ impl<'a> Emitter<'a> {
 
         let is_empty = children.is_none() || start > children.unwrap().len() || count == 0;
         if is_empty && format.contains(ListFormat::OptionalIfEmpty) {
-            // self.handlers.onBeforeEmitNodeArray(children)
-
-            // self.handlers.onAfterEmitNodeArray(children);
-
             return Ok(());
         }
 
@@ -1571,7 +1653,7 @@ impl<'a> Emitter<'a> {
             Pat::Ident(ref n) => emit!(n),
             Pat::Object(ref n) => emit!(n),
             Pat::Rest(ref n) => emit!(n),
-            Pat::Invalid(..) => unimplemented!("emit Pat::Invalid"),
+            Pat::Invalid(..) => invalid_pat(),
         }
     }
 
@@ -1801,7 +1883,7 @@ impl<'a> Emitter<'a> {
                 let lo = node.arg.span().lo();
 
                 // see #415
-                cmt.leading_comments(lo).is_some()
+                cmt.has_leading(lo)
             } else {
                 false
             };
@@ -1903,9 +1985,11 @@ impl<'a> Emitter<'a> {
         keyword!("catch");
         formatting_space!();
 
-        punct!("(");
-        emit!(node.param);
-        punct!(")");
+        if let Some(param) = &node.param {
+            punct!("(");
+            emit!(param);
+            punct!(")");
+        }
 
         space!();
 
@@ -2210,7 +2294,13 @@ fn unescape(s: &str) -> String {
 
             8 => write!(buf, "\\o{:o}", v).unwrap(),
 
-            16 => write!(buf, "\\x{:x}", v).unwrap(),
+            16 => {
+                if v < 16 {
+                    write!(buf, "\\x0{:x}", v).unwrap()
+                } else {
+                    write!(buf, "\\x{:x}", v).unwrap()
+                }
+            }
 
             _ => unreachable!(),
         }
@@ -2220,14 +2310,25 @@ fn unescape(s: &str) -> String {
         }
     }
 
-    let s = s.replace("\\\\", "\\");
-
     let mut result = String::with_capacity(s.len() * 6 / 5);
     let mut chars = s.chars();
 
     while let Some(c) = chars.next() {
         if c != '\\' {
-            result.push(c);
+            match c {
+                '\r' => {
+                    result.push_str("\\r");
+                }
+                '\n' => {
+                    result.push_str("\\n");
+                }
+
+                // TODO: Handle all escapes
+                _ => {
+                    result.push(c);
+                }
+            }
+
             continue;
         }
 
@@ -2236,30 +2337,32 @@ fn unescape(s: &str) -> String {
                 // This is wrong, but it seems like a mistake made by user.
                 result.push('\\');
             }
-            Some(c) => match c {
-                '\\' => result.push('\\'),
-                'n' => result.push_str("\\\n"),
-                'r' => result.push_str("\\\r"),
-                't' => result.push_str("\\\t"),
-                'b' => result.push_str("\\\u{0008}"),
-                'f' => result.push_str("\\\u{000C}"),
-                'v' => result.push_str("\\\u{000B}"),
-                '0' => match chars.next() {
-                    Some('b') => read_escaped(2, None, &mut result, &mut chars),
-                    Some('o') => read_escaped(8, None, &mut result, &mut chars),
-                    Some('x') => read_escaped(16, Some(2), &mut result, &mut chars),
-                    nc => {
-                        // This is wrong, but it seems like a mistake made by user.
-                        result.push('0');
-                        result.extend(nc);
-                    }
-                },
+            Some(c) => {
+                match c {
+                    '\\' => result.push_str(r"\\"),
+                    'n' => result.push_str("\\n"),
+                    'r' => result.push_str("\\r"),
+                    't' => result.push_str("\\t"),
+                    'b' => result.push_str("\\\u{0008}"),
+                    'f' => result.push_str("\\\u{000C}"),
+                    'v' => result.push_str("\\\u{000B}"),
+                    '0' => match chars.next() {
+                        Some('b') => read_escaped(2, None, &mut result, &mut chars),
+                        Some('o') => read_escaped(8, None, &mut result, &mut chars),
+                        Some('x') => read_escaped(16, Some(2), &mut result, &mut chars),
+                        nc => {
+                            // This is wrong, but it seems like a mistake made by user.
+                            result.push_str("\\0");
+                            result.extend(nc);
+                        }
+                    },
 
-                _ => {
-                    result.push('\\');
-                    result.push(c);
+                    _ => {
+                        result.push('\\');
+                        result.push(c);
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -2312,4 +2415,10 @@ fn escape(s: &str) -> Cow<str> {
             .replace("\09", "\\x009")
             .replace("\0", "\\0"),
     )
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_pat() -> ! {
+    unimplemented!("emit Pat::Invalid")
 }

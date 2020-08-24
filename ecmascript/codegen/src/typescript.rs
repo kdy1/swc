@@ -26,7 +26,13 @@ impl<'a> Emitter<'a> {
     fn emit_ts_as_expr(&mut self, n: &TsAsExpr) -> Result {
         self.emit_leading_comments_of_pos(n.span().lo())?;
 
-        unimplemented!("emit_ts_as_expr")
+        emit!(n.expr);
+
+        space!();
+        keyword!("as");
+        space!();
+
+        emit!(n.type_ann);
     }
 
     #[emitter]
@@ -230,7 +236,17 @@ impl<'a> Emitter<'a> {
     fn emit_ts_import_equals_decl(&mut self, n: &TsImportEqualsDecl) -> Result {
         self.emit_leading_comments_of_pos(n.span().lo())?;
 
-        unimplemented!("emit_ts_import_equals_decl")
+        if n.is_export {
+            keyword!("export");
+            space!();
+        }
+
+        keyword!("import");
+        formatting_space!();
+        punct!("=");
+        formatting_space!();
+
+        emit!(n.module_ref);
     }
 
     #[emitter]
@@ -674,6 +690,19 @@ impl<'a> Emitter<'a> {
     }
 
     #[emitter]
+    fn emit_ts_tuple_element(&mut self, n: &TsTupleElement) -> Result {
+        self.emit_leading_comments_of_pos(n.span().lo())?;
+
+        if let Some(label) = &n.label {
+            emit!(label);
+            punct!(":");
+            formatting_space!();
+        }
+
+        emit!(n.ty)
+    }
+
+    #[emitter]
     fn emit_ts_type(&mut self, n: &TsType) -> Result {
         match n {
             TsType::TsKeywordType(n) => emit!(n),
@@ -766,7 +795,12 @@ impl<'a> Emitter<'a> {
     fn emit_ts_const_assertion(&mut self, n: &TsConstAssertion) -> Result {
         self.emit_leading_comments_of_pos(n.span().lo())?;
 
-        unimplemented!("emit_ts_const_assertion")
+        emit!(n.expr);
+
+        space!();
+        keyword!("as");
+        space!();
+        keyword!("const");
     }
 
     #[emitter]

@@ -1,16 +1,16 @@
 //! Parser for object literal.
 
 use super::*;
-use crate::{make_span, parser::class_and_fn::is_not_this};
+use crate::parser::class_and_fn::is_not_this;
 use swc_atoms::js_word;
 use swc_common::Spanned;
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
+impl<'a, I: Tokens> Parser<I> {
     /// Parse a object literal or object pattern.
-    pub(super) fn parse_object<T>(&mut self) -> PResult<'a, T>
+    pub(super) fn parse_object<T>(&mut self) -> PResult<T>
     where
-        Self: ParseObject<'a, T>,
+        Self: ParseObject<T>,
     {
         let start = cur_pos!();
         assert_and_bump!('{');
@@ -37,7 +37,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     /// spec: 'PropertyName'
-    pub(super) fn parse_prop_name(&mut self) -> PResult<'a, PropName> {
+    pub(super) fn parse_prop_name(&mut self) -> PResult<PropName> {
         let ctx = self.ctx();
         self.with_ctx(Context {
             in_property_name: true,
@@ -97,7 +97,9 @@ impl<'a, I: Tokens> Parser<'a, I> {
                         expr,
                     })
                 }
-                _ => unexpected!(),
+                _ => unexpected!(
+                    "identifier, string literal, numeric literal or [ for the computed key"
+                ),
             };
 
             Ok(v)
@@ -106,15 +108,15 @@ impl<'a, I: Tokens> Parser<'a, I> {
 }
 
 #[parser]
-impl<'a, I: Tokens> ParseObject<'a, Box<Expr>> for Parser<'a, I> {
+impl<I: Tokens> ParseObject<Box<Expr>> for Parser<I> {
     type Prop = PropOrSpread;
 
-    fn make_object(&mut self, span: Span, props: Vec<Self::Prop>) -> PResult<'a, Box<Expr>> {
+    fn make_object(&mut self, span: Span, props: Vec<Self::Prop>) -> PResult<Box<Expr>> {
         Ok(Box::new(Expr::Object(ObjectLit { span, props })))
     }
 
     /// spec: 'PropertyDefinition'
-    fn parse_object_prop(&mut self) -> PResult<'a, Self::Prop> {
+    fn parse_object_prop(&mut self) -> PResult<Self::Prop> {
         let start = cur_pos!();
         // Parse as 'MethodDefinition'
 
@@ -198,11 +200,12 @@ impl<'a, I: Tokens> ParseObject<'a, Box<Expr>> for Parser<'a, I> {
 
         let ident = match key {
             PropName::Ident(ident) => ident,
-            _ => unexpected!(),
+            // TODO
+            _ => unexpected!("identifier"),
         };
 
         if eat!('?') {
-            self.emit_err(make_span(self.input.prev_span()), SyntaxError::TS1162);
+            self.emit_err(self.input.prev_span(), SyntaxError::TS1162);
         }
 
         // `ident` from parse_prop_name is parsed as 'IdentifierName'
@@ -231,7 +234,7 @@ impl<'a, I: Tokens> ParseObject<'a, Box<Expr>> for Parser<'a, I> {
         match ident.sym {
             js_word!("get") | js_word!("set") | js_word!("async") => {
                 if has_modifiers {
-                    self.emit_err(make_span(modifiers_span), SyntaxError::TS1042);
+                    self.emit_err(modifiers_span, SyntaxError::TS1042);
                 }
 
                 let is_generator = ident.sym == js_word!("async") && eat!('*');
@@ -347,16 +350,25 @@ impl<'a, I: Tokens> ParseObject<'a, Box<Expr>> for Parser<'a, I> {
                     _ => unreachable!(),
                 }
             }
-            _ => unexpected!(),
+            _ => {
+                if self.input.syntax().typescript() {
+                    unexpected!(
+                        "... , *,  (, [, :, , ?, =, an identifier, public, protected, private, \
+                         readonly, <."
+                    )
+                } else {
+                    unexpected!("... , *,  (, [, :, , ?, = or an identifier")
+                }
+            }
         }
     }
 }
 
 #[parser]
-impl<'a, I: Tokens> ParseObject<'a, Pat> for Parser<'a, I> {
+impl<I: Tokens> ParseObject<Pat> for Parser<I> {
     type Prop = ObjectPatProp;
 
-    fn make_object(&mut self, span: Span, props: Vec<Self::Prop>) -> PResult<'a, Pat> {
+    fn make_object(&mut self, span: Span, props: Vec<Self::Prop>) -> PResult<Pat> {
         let len = props.len();
         for (i, p) in props.iter().enumerate() {
             if i == len - 1 {
@@ -387,7 +399,7 @@ impl<'a, I: Tokens> ParseObject<'a, Pat> for Parser<'a, I> {
     }
 
     /// Production 'BindingProperty'
-    fn parse_object_prop(&mut self) -> PResult<'a, Self::Prop> {
+    fn parse_object_prop(&mut self) -> PResult<Self::Prop> {
         let start = cur_pos!();
 
         if eat!("...") {
@@ -412,7 +424,7 @@ impl<'a, I: Tokens> ParseObject<'a, Pat> for Parser<'a, I> {
         }
         let key = match key {
             PropName::Ident(ident) => ident,
-            _ => unexpected!(),
+            _ => unexpected!("an identifier"),
         };
 
         let value = if eat!('=') {

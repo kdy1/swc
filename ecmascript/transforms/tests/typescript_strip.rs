@@ -1,19 +1,26 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 use swc_common::chain;
-use swc_ecma_transforms::{resolver, typescript::strip};
+use swc_ecma_parser::{Syntax, TsConfig};
+use swc_ecma_transforms::{
+    compat::es2020::typescript_class_properties, proposals::decorators, resolver, typescript::strip,
+};
+use swc_ecma_visit::Fold;
 
 #[macro_use]
 mod common;
 
+fn tr() -> impl Fold {
+    strip()
+}
+
 macro_rules! to {
     ($name:ident, $from:expr, $to:expr) => {
         test!(
-            ::swc_ecma_parser::Syntax::Typescript(Default::default()),
-            |_| strip(),
+            Syntax::Typescript(TsConfig {
+                decorators: true,
+                ..Default::default()
+            }),
+            |_| tr(),
             $name,
             $from,
             $to,
@@ -582,4 +589,318 @@ to!(
         console.log(a)
     }
 }"
+);
+
+to!(
+    issue_820_1,
+    "enum Direction {
+    Up = 1,
+    Down = 2,
+    Left = Up + Down,
+}",
+    "var Direction;
+(function (Direction) {
+    Direction[Direction['Up'] = 1] = 'Up';
+    Direction[Direction['Down'] = 2] = 'Down';
+    Direction[Direction['Left'] = 3] = 'Left';
+})(Direction || (Direction = {}));"
+);
+
+to!(
+    issue_915,
+    "export class Logger {
+    #level: LogLevels;
+    #handlers: BaseHandler[];
+    readonly #loggerName: string;
+    
+    constructor(
+        loggerName: string,
+        levelName: LevelName,
+        options: LoggerOptions = {},
+    ) {
+        this.#loggerName = loggerName;
+        this.#level = getLevelByName(levelName);
+        this.#handlers = options.handlers || [];
+    }
+}",
+    "export class Logger {
+    #level;
+    #handlers;
+    #loggerName;
+    constructor(loggerName, levelName, options = {
+    }){
+        this.#loggerName = loggerName;
+        this.#level = getLevelByName(levelName);
+        this.#handlers = options.handlers || [];
+    }
+}"
+);
+
+to!(
+    issue_915_2,
+    r#"Deno.test("[ws] WebSocket should act as asyncIterator", async () => {
+  enum Frames {
+    ping,
+    hello,
+    close,
+    end,
+  }
+});"#,
+    r#"Deno.test("[ws] WebSocket should act as asyncIterator", async ()=>{
+    var Frames;
+    (function(Frames) {
+        Frames[Frames["ping"] = 0] = "ping";
+        Frames[Frames["hello"] = 1] = "hello";
+        Frames[Frames["close"] = 2] = "close";
+        Frames[Frames["end"] = 3] = "end";
+    })(Frames || (Frames = {
+    }));
+});"#
+);
+
+to!(
+    issue_915_3,
+    r#"export class MultipartReader {
+    readonly newLine = encoder.encode("\r\n");
+}"#,
+    r#"export class MultipartReader {
+    newLine = encoder.encode("\r\n");
+}"#
+);
+
+to!(
+    issue_912,
+    r#"export class BadRequestError extends Error {
+    constructor(public readonly message: string) {
+      super(message)
+    }
+}"#,
+    r#"export class BadRequestError extends Error {
+    constructor(message) {
+      super(message)
+      this.message = message
+    }
+}"#
+);
+
+to!(
+    issue_921,
+    "export abstract class Kernel {
+  [key: string]: any
+}",
+    "export abstract class Kernel {}"
+);
+
+to!(
+    issue_926,
+    "class A extends Object {
+  constructor(public a, private b) {
+    super();
+  }
+}",
+    "class A extends Object {
+    constructor(a, b){
+        super();
+        this.a = a;
+        this.b = b;
+    }
+}"
+);
+
+test!(
+    ::swc_ecma_parser::Syntax::Typescript(Default::default()),
+    |_| chain!(typescript_class_properties(), tr()),
+    issue_930_instance,
+    "class A {
+        b = this.a;
+        constructor(readonly a){
+        }
+    }",
+    "class A {
+    constructor(a) {
+        this.a = a;
+        this.b = this.a;
+    }
+}"
+);
+
+test!(
+    ::swc_ecma_parser::Syntax::Typescript(Default::default()),
+    |_| chain!(typescript_class_properties(), tr()),
+    issue_930_static,
+    "class A {
+        static b = 'foo';
+        constructor(a){
+        }
+    }",
+    "class A {
+        constructor(a) {
+        }
+    }
+    A.b = 'foo';"
+);
+
+test!(
+    ::swc_ecma_parser::Syntax::Typescript(Default::default()),
+    |_| chain!(typescript_class_properties(), tr()),
+    typescript_001,
+    "class A {
+        foo = new Subject()
+      
+        constructor() {
+          this.foo.subscribe()
+        }
+      }",
+    "class A {
+        constructor() {
+            this.foo = new Subject()
+            this.foo.subscribe()
+        }
+      }"
+);
+
+test!(
+    ::swc_ecma_parser::Syntax::Typescript(Default::default()),
+    |_| chain!(typescript_class_properties(), tr()),
+    typescript_002,
+    "class A extends B {
+            foo = 'foo'
+            b = this.a;
+
+            declare1
+            declare2!: string
+          
+            constructor(private readonly a: string, readonly c, private d: number = 1) {
+                super()
+                this.foo.subscribe()
+            }
+          }",
+    "class A extends B {
+        constructor(a, c, d = 1) {
+            super();
+            this.a = a;
+            this.c = c;
+            this.d = d;
+            this.foo = 'foo';
+            this.b = this.a;
+            this.foo.subscribe();
+        }
+    }"
+);
+
+test!(
+    ::swc_ecma_parser::Syntax::Typescript(Default::default()),
+    |_| chain!(typescript_class_properties(), tr()),
+    issue_958,
+    "export class Test {
+        constructor(readonly test?: string) {}
+    }",
+    "export class Test {
+        constructor(test){
+            this.test = test;
+        }
+    }"
+);
+
+test!(
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    }),
+    |_| chain!(
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        strip()
+    ),
+    issue_960_1,
+    "
+    function DefineAction() {
+        return (target, property) => {
+            console.log(target, property);
+        }
+    }
+    class Base {
+        constructor() {
+          this.action = new Subject()
+        }
+      }
+      
+      class Child extends Base {
+        @DefineAction() action: Observable<void>
+       
+        callApi() {
+          console.log(this.action) // undefined
+        }
+      }
+    ",
+    r#"var _class, _descriptor;
+    function DefineAction() {
+        return (target, property)=>{
+            console.log(target, property);
+        };
+    }
+    class Base {
+        constructor(){
+            this.action = new Subject();
+        }
+    }
+    var _dec = DefineAction();
+    let Child = ((_class = class Child extends Base {
+        callApi() {
+            console.log(this.action);
+        }
+        constructor(...args){
+            super(...args);
+            _initializerDefineProperty(this, "action", _descriptor, this);
+        }
+    }) || _class, _descriptor = _applyDecoratedDescriptor(_class.prototype, "action", [
+        _dec
+    ], {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        initializer: void 0
+    }), _class);
+    "#,
+    ok_if_code_eq
+);
+
+test_exec!(
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    }),
+    |_| chain!(
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        strip()
+    ),
+    issue_960_2,
+    "function DefineAction() { return function(_a, _b, c) { return c } }
+
+    class Base {
+      constructor() {
+        this.action = 1
+      }
+    }
+    
+    class Child extends Base {
+      @DefineAction() action: number
+     
+      callApi() {
+        console.log(this.action) // undefined
+        return this.action
+      }
+    }
+    
+    const c = new Child()
+    
+    c.callApi()
+    expect(c.callApi()).not.toBe(undefined)
+    expect(c.action).toBe(1);
+    "
 );

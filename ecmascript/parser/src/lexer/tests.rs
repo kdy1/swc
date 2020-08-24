@@ -4,16 +4,12 @@ use super::{
     state::{lex, lex_module, lex_tokens, with_lexer},
     *,
 };
-use crate::{
-    error::{Error, SyntaxError},
-    make_span,
-};
+use crate::error::{Error, SyntaxError};
 use std::{ops::Range, str};
-use swc_common::SpanData;
 use test::{black_box, Bencher};
 
-fn sp(r: Range<usize>) -> SpanData {
-    SpanData {
+fn sp(r: Range<usize>) -> Span {
+    Span {
         lo: BytePos(r.start as u32),
         hi: BytePos(r.end as u32),
         ctxt: Default::default(),
@@ -42,9 +38,9 @@ impl SpanRange for usize {
         )
     }
 }
-impl SpanRange for SpanData {
+impl SpanRange for Span {
     fn into_span(self) -> Span {
-        Span::new(self.lo, self.hi, self.ctxt)
+        self
     }
 }
 impl SpanRange for Range<usize> {
@@ -65,7 +61,7 @@ trait WithSpan: Sized {
         TokenAndSpan {
             token: self.into_token(),
             had_line_break: false,
-            span: span.into_span().data(),
+            span: span.into_span(),
         }
     }
     fn into_token(self) -> Token;
@@ -129,8 +125,7 @@ fn module_legacy_decimal() {
     assert_eq!(
         lex_module(Syntax::default(), "08"),
         vec![Token::Error(Error {
-            span: make_span(sp(0..2)),
-            error: SyntaxError::LegacyDecimal,
+            error: Box::new((sp(0..2), SyntaxError::LegacyDecimal)),
         })
         .span(0..2)
         .lb(),]
@@ -142,8 +137,7 @@ fn module_legacy_comment_1() {
     assert_eq!(
         lex_module(Syntax::default(), "<!-- foo oo"),
         vec![Token::Error(Error {
-            span: make_span(sp(0..11)),
-            error: SyntaxError::LegacyCommentInModule,
+            error: Box::new((sp(0..11), SyntaxError::LegacyCommentInModule)),
         })
         .span(0..11)
         .lb(),]
@@ -155,8 +149,7 @@ fn module_legacy_comment_2() {
     assert_eq!(
         lex_module(Syntax::default(), "-->"),
         vec![Token::Error(Error {
-            span: make_span(sp(0..3)),
-            error: SyntaxError::LegacyCommentInModule,
+            error: Box::new((sp(0..3), SyntaxError::LegacyCommentInModule)),
         })
         .span(0..3)
         .lb(),]
@@ -422,7 +415,7 @@ fn simple_regex() {
 
 #[test]
 fn complex_regex() {
-    testing::assert_eq_ignore_span!(
+    assert_eq!(
         lex_tokens(Syntax::default(), "f(); function foo() {} /42/i"),
         vec![
             Word(Word::Ident("f".into())),
@@ -648,7 +641,7 @@ fn str_lit() {
             has_escape: false,
         }],
     );
-    testing::assert_eq_ignore_span!(
+    assert_eq!(
         lex_tokens(Syntax::default(), "'\\\nabc'"),
         vec![Token::Str {
             value: "abc".into(),
@@ -1054,6 +1047,27 @@ fn issue_481() {
                 name: "span".into()
             },
             JSXTagEnd,
+        ]
+    );
+}
+
+#[test]
+fn issue_915_1() {
+    assert_eq!(
+        lex_tokens(
+            crate::Syntax::Es(crate::EsConfig {
+                ..Default::default()
+            }),
+            r##"encode("\r\n")"##
+        ),
+        vec![
+            Word(Word::Ident("encode".into())),
+            LParen,
+            Token::Str {
+                value: "\r\n".into(),
+                has_escape: true
+            },
+            RParen
         ]
     );
 }

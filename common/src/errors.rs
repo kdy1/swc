@@ -7,13 +7,16 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-
+#[cfg(feature = "tty-emitter")]
+pub use self::emitter::EmitterWriter;
 use self::Level::*;
 pub use self::{
     diagnostic::{Diagnostic, DiagnosticId, DiagnosticStyledString, SubDiagnostic},
     diagnostic_builder::DiagnosticBuilder,
-    emitter::{ColorConfig, Emitter, EmitterWriter},
+    emitter::{ColorConfig, Emitter},
 };
+#[cfg(feature = "tty-emitter")]
+use crate::sync::Lrc;
 use crate::{
     rustc_data_structures::stable_hasher::StableHasher,
     sync::{Lock, LockCell},
@@ -24,11 +27,9 @@ use std::{
     cell::RefCell,
     collections::HashSet,
     error, fmt, panic,
-    sync::{
-        atomic::{AtomicUsize, Ordering::SeqCst},
-        Arc,
-    },
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
 };
+#[cfg(feature = "tty-emitter")]
 use termcolor::{Color, ColorSpec};
 
 mod diagnostic;
@@ -100,9 +101,9 @@ pub struct SubstitutionPart {
     pub snippet: String,
 }
 
-pub type SourceMapperDyn = dyn SourceMapper + Send + Sync;
+pub type SourceMapperDyn = dyn SourceMapper;
 
-pub trait SourceMapper {
+pub trait SourceMapper: crate::sync::Send + crate::sync::Sync {
     fn lookup_char_pos(&self, pos: BytePos) -> Loc;
     fn span_to_lines(&self, sp: Span) -> FileLinesResult;
     fn span_to_string(&self, sp: Span) -> String;
@@ -273,7 +274,7 @@ pub struct Handler {
     pub flags: HandlerFlags,
 
     err_count: AtomicUsize,
-    emitter: Lock<Box<dyn Emitter + Send>>,
+    emitter: Lock<Box<dyn Emitter>>,
     continue_after_error: LockCell<bool>,
     delayed_span_bugs: Lock<Vec<Diagnostic>>,
 
@@ -331,11 +332,12 @@ impl Drop for Handler {
 }
 
 impl Handler {
+    #[cfg(feature = "tty-emitter")]
     pub fn with_tty_emitter(
         color_config: ColorConfig,
         can_emit_warnings: bool,
         treat_err_as_bug: bool,
-        cm: Option<Arc<SourceMapperDyn>>,
+        cm: Option<Lrc<SourceMapperDyn>>,
     ) -> Handler {
         Handler::with_tty_emitter_and_flags(
             color_config,
@@ -348,9 +350,10 @@ impl Handler {
         )
     }
 
+    #[cfg(feature = "tty-emitter")]
     pub fn with_tty_emitter_and_flags(
         color_config: ColorConfig,
-        cm: Option<Arc<SourceMapperDyn>>,
+        cm: Option<Lrc<SourceMapperDyn>>,
         flags: HandlerFlags,
     ) -> Handler {
         let emitter = Box::new(EmitterWriter::stderr(color_config, cm, false, false));
@@ -372,7 +375,7 @@ impl Handler {
         )
     }
 
-    pub fn with_emitter_and_flags(e: Box<dyn Emitter + Send>, flags: HandlerFlags) -> Handler {
+    pub fn with_emitter_and_flags(e: Box<dyn Emitter>, flags: HandlerFlags) -> Handler {
         Handler {
             flags,
             err_count: AtomicUsize::new(0),
@@ -769,6 +772,7 @@ impl fmt::Display for Level {
 }
 
 impl Level {
+    #[cfg(feature = "tty-emitter")]
     fn color(self) -> ColorSpec {
         let mut spec = ColorSpec::new();
         match self {

@@ -1,6 +1,7 @@
 use crate::builder::PassBuilder;
 use anyhow::{bail, Context, Error};
 use dashmap::DashMap;
+use either::Either;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -13,20 +14,19 @@ use std::{
 };
 use swc_atoms::JsWord;
 pub use swc_common::chain;
-use swc_common::{errors::Handler, FileName, Mark, SourceMap};
-pub use swc_ecmascript::parser::JscTarget;
-use swc_ecmascript::{
-    ast::{Expr, ExprStmt, ModuleItem, Stmt},
-    parser::{lexer::Lexer, Parser, Session as ParseSess, SourceFileInput, Syntax, TsConfig},
-    preset_env,
-    transforms::{
-        const_modules, modules,
-        optimization::{simplifier, InlineGlobals, JsonParse},
-        pass::{noop, Optional, Pass},
-        proposals::{class_properties, decorators, export, nullish_coalescing, optional_chaining},
-        react, resolver_with_mark, typescript,
-    },
+use swc_common::{comments::Comments, errors::Handler, FileName, Mark, SourceMap};
+use swc_ecma_ast::{Expr, ExprStmt, ModuleItem, Stmt};
+pub use swc_ecma_parser::JscTarget;
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
+use swc_ecma_transforms::{
+    compat::es2020::typescript_class_properties,
+    const_modules, modules,
+    optimization::{inline_globals, json_parse, simplifier},
+    pass::{noop, Optional},
+    proposals::{decorators, export},
+    react, resolver_with_mark, typescript,
 };
+use swc_ecma_visit::Fold;
 
 #[cfg(test)]
 mod tests;
@@ -46,11 +46,30 @@ pub struct ParseOptions {
     pub target: JscTarget,
 }
 
-#[derive(Default, Deserialize)]
+#[cfg(target_arch = "wasm32")]
+fn default_as_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Options {
     #[serde(flatten, default)]
     pub config: Option<Config>,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip_deserializing, default)]
+    pub disable_hygiene: bool,
+
+    #[cfg(target_arch = "wasm32")]
+    #[serde(default = "default_as_true")]
+    pub disable_hygiene: bool,
+
+    #[serde(skip_deserializing, default)]
+    pub disable_fixer: bool,
+
+    #[serde(skip_deserializing, default)]
+    pub global_mark: Option<Mark>,
 
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(default = "default_cwd")]
@@ -101,7 +120,8 @@ fn default_is_module() -> bool {
     true
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Configuration related to source map generaged by swc.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum SourceMapsConfig {
     Bool(bool),
@@ -126,7 +146,7 @@ impl Default for SourceMapsConfig {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InputSourceMap {
     Bool(bool),
@@ -135,18 +155,19 @@ pub enum InputSourceMap {
 
 impl Default for InputSourceMap {
     fn default() -> Self {
-        InputSourceMap::Bool(true)
+        InputSourceMap::Bool(false)
     }
 }
 
 impl Options {
-    pub fn build(
+    pub fn build<'a>(
         &self,
         cm: &Arc<SourceMap>,
         handler: &Handler,
         is_module: bool,
         config: Option<Config>,
-    ) -> BuiltConfig<impl Pass> {
+        comments: Option<&'a dyn Comments>,
+    ) -> BuiltConfig<impl 'a + swc_ecma_visit::Fold> {
         let mut config = config.unwrap_or_else(Default::default);
         if let Some(ref c) = self.config {
             config.merge(c)
@@ -175,18 +196,14 @@ impl Options {
 
             let globals = config.globals;
 
-            Optional::new(const_modules(globals), enabled)
+            Optional::new(const_modules(cm.clone(), globals), enabled)
         };
 
         let json_parse_pass = {
             if let Some(ref cfg) = optimizer.as_ref().and_then(|v| v.jsonify) {
-                JsonParse {
-                    min_cost: cfg.min_cost,
-                }
+                Either::Left(json_parse(cfg.min_cost))
             } else {
-                JsonParse {
-                    min_cost: usize::MAX,
-                }
+                Either::Right(noop())
             }
         };
 
@@ -201,24 +218,26 @@ impl Options {
             pass
         };
 
-        let root_mark = Mark::fresh(Mark::root());
+        let root_mark = self
+            .global_mark
+            .unwrap_or_else(|| Mark::fresh(Mark::root()));
 
         let pass = chain!(
             // handle jsx
             Optional::new(react::react(cm.clone(), transform.react), syntax.jsx()),
-            Optional::new(typescript::strip(), syntax.typescript()),
-            Optional::new(nullish_coalescing(), syntax.nullish_coalescing()),
-            Optional::new(optional_chaining(), syntax.optional_chaining()),
-            resolver_with_mark(root_mark),
-            const_modules,
-            optimization,
+            // Decorators may use type information
             Optional::new(
                 decorators(decorators::Config {
-                    legacy: transform.legacy_decorator
+                    legacy: transform.legacy_decorator,
+                    emit_metadata: transform.decorator_metadata,
                 }),
                 syntax.decorators()
             ),
-            Optional::new(class_properties(), syntax.class_props()),
+            Optional::new(typescript_class_properties(), syntax.typescript()),
+            Optional::new(typescript::strip(), syntax.typescript()),
+            resolver_with_mark(root_mark),
+            const_modules,
+            optimization,
             Optional::new(
                 export(),
                 syntax.export_default_from() || syntax.export_namespace_from()
@@ -229,8 +248,10 @@ impl Options {
 
         let pass = PassBuilder::new(&cm, &handler, loose, root_mark, pass)
             .target(target)
+            .hygiene(!self.disable_hygiene)
+            .fixer(!self.disable_fixer)
             .preset_env(config.env)
-            .finalize(root_mark, syntax, config.module);
+            .finalize(root_mark, syntax, config.module, comments);
 
         BuiltConfig {
             minify: config.minify.unwrap_or(false),
@@ -248,7 +269,7 @@ impl Options {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RootMode {
     #[serde(rename = "root")]
     Root,
@@ -267,7 +288,7 @@ const fn default_swcrc() -> bool {
     true
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ConfigFile {
     Bool(bool),
@@ -280,7 +301,7 @@ impl Default for ConfigFile {
     }
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallerOptions {
     pub name: String,
@@ -392,7 +413,7 @@ impl Rc {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Config {
     #[serde(default)]
-    pub env: Option<preset_env::Config>,
+    pub env: Option<swc_ecma_preset_env::Config>,
 
     #[serde(default)]
     pub test: Option<FileMatcher>,
@@ -476,7 +497,7 @@ impl Config {
 }
 
 /// One `BuiltConfig` per a directory with swcrc
-pub struct BuiltConfig<P: Pass> {
+pub struct BuiltConfig<P: swc_ecma_visit::Fold> {
     pub pass: P,
     pub syntax: Syntax,
     pub target: JscTarget,
@@ -516,6 +537,8 @@ pub enum ModuleConfig {
     Umd(modules::umd::Config),
     #[serde(rename = "amd")]
     Amd(modules::amd::Config),
+    #[serde(rename = "es6")]
+    Es6,
 }
 
 impl ModuleConfig {
@@ -523,14 +546,14 @@ impl ModuleConfig {
         cm: Arc<SourceMap>,
         root_mark: Mark,
         config: Option<ModuleConfig>,
-    ) -> Box<dyn Pass> {
+    ) -> Box<dyn swc_ecma_visit::Fold> {
         match config {
-            None => box noop(),
+            None | Some(ModuleConfig::Es6) => Box::new(noop()),
             Some(ModuleConfig::CommonJs(config)) => {
-                box modules::common_js::common_js(root_mark, config)
+                Box::new(modules::common_js::common_js(root_mark, config))
             }
-            Some(ModuleConfig::Umd(config)) => box modules::umd::umd(cm, root_mark, config),
-            Some(ModuleConfig::Amd(config)) => box modules::amd::amd(config),
+            Some(ModuleConfig::Umd(config)) => Box::new(modules::umd::umd(cm, root_mark, config)),
+            Some(ModuleConfig::Amd(config)) => Box::new(modules::amd::amd(config)),
         }
     }
 }
@@ -549,6 +572,9 @@ pub struct TransformConfig {
 
     #[serde(default)]
     pub legacy_decorator: bool,
+
+    #[serde(default)]
+    pub decorator_metadata: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -596,7 +622,7 @@ fn default_envs() -> HashSet<String> {
 }
 
 impl GlobalPassOption {
-    pub fn build(self, cm: &SourceMap, handler: &Handler) -> InlineGlobals {
+    pub fn build(self, cm: &SourceMap, handler: &Handler) -> impl 'static + Fold {
         fn mk_map(
             cm: &SourceMap,
             handler: &Handler,
@@ -613,20 +639,22 @@ impl GlobalPassOption {
                 };
                 let v_str = v.clone();
                 let fm = cm.new_source_file(FileName::Custom(format!("GLOBAL.{}", k)), v);
-                let session = ParseSess { handler };
                 let lexer = Lexer::new(
-                    session,
                     Syntax::Es(Default::default()),
                     Default::default(),
-                    SourceFileInput::from(&*fm),
+                    StringInput::from(&*fm),
                     None,
                 );
 
-                let mut module = Parser::new_from(session, lexer)
-                    .parse_module()
-                    .map_err(|mut e| {
-                        e.emit();
-                    })
+                let mut p = Parser::new_from(lexer);
+                let module = p.parse_module();
+
+                for e in p.take_errors() {
+                    e.into_diagnostic(handler).emit()
+                }
+
+                let mut module = module
+                    .map_err(|e| e.into_diagnostic(handler).emit())
                     .unwrap_or_else(|()| {
                         panic!(
                             "failed to parse global variable {}=`{}` as module",
@@ -635,7 +663,7 @@ impl GlobalPassOption {
                     });
 
                 let expr = match module.body.pop() {
-                    Some(ModuleItem::Stmt(Stmt::Expr(ExprStmt { box expr, .. }))) => expr,
+                    Some(ModuleItem::Stmt(Stmt::Expr(ExprStmt { expr, .. }))) => *expr,
                     _ => panic!("{} is not a valid expression", v_str),
                 };
 
@@ -646,10 +674,8 @@ impl GlobalPassOption {
         }
 
         let envs = self.envs;
-        InlineGlobals {
-            globals: mk_map(cm, handler, self.vars.into_iter(), false),
-
-            envs: if cfg!(target_arch = "wasm32") {
+        inline_globals(
+            if cfg!(target_arch = "wasm32") {
                 mk_map(cm, handler, vec![].into_iter(), true)
             } else {
                 mk_map(
@@ -659,7 +685,8 @@ impl GlobalPassOption {
                     true,
                 )
             },
-        }
+            mk_map(cm, handler, self.vars.into_iter(), false),
+        )
     }
 }
 
@@ -705,7 +732,7 @@ impl Merge for Config {
     }
 }
 
-impl Merge for preset_env::Config {
+impl Merge for swc_ecma_preset_env::Config {
     fn merge(&mut self, from: &Self) {
         *self = from.clone();
     }

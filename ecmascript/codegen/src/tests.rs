@@ -1,4 +1,4 @@
-use self::swc_ecma_parser::{Parser, Session, SourceFileInput, Syntax};
+use self::swc_ecma_parser::{EsConfig, Parser, StringInput, Syntax};
 use super::*;
 use crate::config::Config;
 use std::{
@@ -6,16 +6,13 @@ use std::{
     io::Write,
     sync::{Arc, RwLock},
 };
-use swc_common::{comments::Comments, FileName, SourceMap};
+use swc_common::{comments::SingleThreadedComments, FileName, SourceMap};
 use swc_ecma_parser;
-
-struct Noop;
-impl Handlers for Noop {}
 
 struct Builder {
     cfg: Config,
-    cm: Arc<SourceMap>,
-    comments: Comments,
+    cm: Lrc<SourceMap>,
+    comments: SingleThreadedComments,
 }
 
 impl Builder {
@@ -28,7 +25,6 @@ impl Builder {
             cm: self.cm.clone(),
             wr: Box::new(text_writer::JsWriter::new(self.cm.clone(), "\n", s, None)),
             comments: Some(&self.comments),
-            handlers: Box::new(Noop),
         };
 
         let ret = op(&mut e);
@@ -48,7 +44,7 @@ impl Builder {
     }
 }
 
-fn parse_then_emit(from: &str, cfg: Config) -> String {
+fn parse_then_emit(from: &str, cfg: Config, syntax: Syntax) -> String {
     ::testing::run_test(false, |cm, handler| {
         let src = cm.new_source_file(FileName::Real("custom.js".into()), from.to_string());
         println!(
@@ -58,15 +54,16 @@ fn parse_then_emit(from: &str, cfg: Config) -> String {
 
         let comments = Default::default();
         let res = {
-            let mut parser = Parser::new(
-                Session { handler: &handler },
-                Syntax::default(),
-                SourceFileInput::from(&*src),
-                Some(&comments),
-            );
-            parser.parse_module().map_err(|mut e| {
-                e.emit();
-            })?
+            let mut parser = Parser::new(syntax, StringInput::from(&*src), Some(&comments));
+            let res = parser
+                .parse_module()
+                .map_err(|e| e.into_diagnostic(handler).emit());
+
+            for err in parser.take_errors() {
+                err.into_diagnostic(handler).emit()
+            }
+
+            res?
         };
 
         let out = Builder { cfg, cm, comments }.text(from, |e| e.emit_module(&res).unwrap());
@@ -76,19 +73,35 @@ fn parse_then_emit(from: &str, cfg: Config) -> String {
 }
 
 pub(crate) fn assert_min(from: &str, to: &str) {
-    let out = parse_then_emit(from, Config { minify: true });
+    let out = parse_then_emit(from, Config { minify: true }, Syntax::default());
 
     assert_eq!(DebugUsingDisplay(out.trim()), DebugUsingDisplay(to),);
 }
 
 pub(crate) fn assert_pretty(from: &str, to: &str) {
-    let out = parse_then_emit(from, Config { minify: false });
+    let out = parse_then_emit(from, Config { minify: false }, Syntax::default());
 
     assert_eq!(DebugUsingDisplay(&out.trim()), DebugUsingDisplay(to),);
 }
 
-fn test_from_to(from: &str, to: &str) {
-    let out = parse_then_emit(from, Default::default());
+fn test_from_to(from: &str, expected: &str) {
+    let out = parse_then_emit(from, Default::default(), Syntax::default());
+
+    dbg!(&out);
+    dbg!(&expected);
+
+    assert_eq!(
+        DebugUsingDisplay(out.trim()),
+        DebugUsingDisplay(expected.trim()),
+    );
+}
+
+fn test_identical(from: &str) {
+    test_from_to(from, from)
+}
+
+fn test_from_to_custom_config(from: &str, to: &str, cfg: Config, syntax: Syntax) {
+    let out = parse_then_emit(from, cfg, syntax);
 
     assert_eq!(DebugUsingDisplay(out.trim()), DebugUsingDisplay(to.trim()),);
 }
@@ -166,18 +179,111 @@ fn no_octal_escape() {
 }
 
 #[test]
+fn empty_named_export() {
+    test_from_to("export { }", "export { };");
+}
+
+#[test]
+fn empty_named_export_min() {
+    test_from_to_custom_config(
+        "export { }",
+        "export{};",
+        Config { minify: true },
+        Default::default(),
+    );
+}
+
+#[test]
+fn empty_named_export_from() {
+    test_from_to("export { } from 'foo';", "export { } from 'foo';");
+}
+
+#[test]
+fn empty_named_export_from_min() {
+    test_from_to_custom_config(
+        "export { } from 'foo';",
+        "export{}from'foo';",
+        Config { minify: true },
+        Default::default(),
+    );
+}
+
+#[test]
+fn named_export_from() {
+    test_from_to("export { bar } from 'foo';", "export { bar } from 'foo';");
+}
+
+#[test]
+fn named_export_from_min() {
+    test_from_to_custom_config(
+        "export { bar } from 'foo';",
+        "export{bar}from'foo';",
+        Config { minify: true },
+        Default::default(),
+    );
+}
+
+#[test]
+fn export_namespace_from() {
+    test_from_to_custom_config(
+        "export * as Foo from 'foo';",
+        "export * as Foo from 'foo';",
+        Default::default(),
+        Syntax::Es(EsConfig {
+            export_namespace_from: true,
+            ..EsConfig::default()
+        }),
+    );
+}
+
+#[test]
+fn export_namespace_from_min() {
+    test_from_to_custom_config(
+        "export * as Foo from 'foo';",
+        "export*as Foo from'foo';",
+        Config { minify: true },
+        Syntax::Es(EsConfig {
+            export_namespace_from: true,
+            ..EsConfig::default()
+        }),
+    );
+}
+
+#[test]
+fn named_and_namespace_export_from() {
+    test_from_to_custom_config(
+        "export * as Foo, { bar } from 'foo';",
+        "export * as Foo, { bar } from 'foo';",
+        Default::default(),
+        Syntax::Es(EsConfig {
+            export_namespace_from: true,
+            ..EsConfig::default()
+        }),
+    );
+}
+
+#[test]
+fn named_and_namespace_export_from_min() {
+    test_from_to_custom_config(
+        "export * as Foo, { bar } from 'foo';",
+        "export*as Foo,{bar}from'foo';",
+        Config { minify: true },
+        Syntax::Es(EsConfig {
+            export_namespace_from: true,
+            ..EsConfig::default()
+        }),
+    );
+}
+
+#[test]
 fn issue_450() {
     test_from_to(
         r#"console.log(`
 \`\`\`html
 <h1>It works!</h1>
 \`\`\`
-`)"#,
-        r#"console.log(`
-\`\`\`html
-<h1>It works!</h1>
-\`\`\`
 `);"#,
+        r#"console.log(`\n\`\`\`html\n<h1>It works!</h1>\n\`\`\`\n`);"#,
     );
 }
 
@@ -201,6 +307,120 @@ fn issue_637() {
 #[test]
 fn issue_639() {
     test_from_to(r"`\x1b[33m Yellow \x1b[0m`;", r"`\x1b[33m Yellow \x1b[0m`;");
+}
+
+#[test]
+fn issue_910() {
+    test_from_to(
+        "console.log(\"Hello World\");",
+        "console.log(\"Hello World\");",
+    );
+
+    test_from_to("console.log('Hello World');", "console.log('Hello World');");
+
+    test_from_to(
+        "console.log(\"Hello\\\" World\");",
+        "console.log(\"Hello\\\" World\");",
+    );
+
+    test_from_to(
+        "console.log('Hello\\' World');",
+        "console.log('Hello\\' World');",
+    );
+}
+
+#[test]
+fn tpl_1() {
+    test_from_to(
+        "`id '${id}' must be a non-empty string`;",
+        "`id '${id}' must be a non-empty string`;",
+    )
+}
+
+#[test]
+fn tpl_2() {
+    test_from_to(
+        "`${Module.wrapper[0]}${script}${Module.wrapper[1]}`",
+        "`${Module.wrapper[0]}${script}${Module.wrapper[1]}`;",
+    );
+}
+
+#[test]
+fn tpl_escape_1() {
+    test_from_to(
+        "`${parent.path}\x00${request}`",
+        "`${parent.path}\x00${request}`;",
+    )
+}
+
+#[test]
+fn tpl_escape_2() {
+    test_from_to("`${arg}\0`", "`${arg}\0`;");
+}
+
+#[test]
+fn tpl_escape_3() {
+    test_from_to(
+        r#"`${resolvedDevice.toLowerCase()}\\`"#,
+        r#"`${resolvedDevice.toLowerCase()}\\`;"#,
+    );
+}
+
+#[test]
+fn tpl_escape_4() {
+    test_from_to(
+        r#"`\\\\${firstPart}\\${path.slice(last)}`"#,
+        r#"`\\\\${firstPart}\\${path.slice(last)}`;"#,
+    );
+}
+
+#[test]
+fn tpl_escape_5() {
+    test_from_to(
+        r#"const data = text.encode(`${arg}\0`);"#,
+        r#"const data = text.encode(`${arg}\0`);"#,
+    );
+}
+
+#[test]
+fn tpl_escape_6() {
+    let from = r#"export class MultipartReader {
+    newLine = encoder.encode("\r\n");
+    newLineDashBoundary = encoder.encode(`\r\n--${this.boundary}`);
+    dashBoundaryDash = encoder.encode(`--${this.boundary}--`);
+}"#;
+    let to = r#"export class MultipartReader {
+    newLine = encoder.encode("\r\n");
+    newLineDashBoundary = encoder.encode(`\r\n--${this.boundary}`);
+    dashBoundaryDash = encoder.encode(`--${this.boundary}--`);
+}"#;
+
+    let out = parse_then_emit(
+        from,
+        Default::default(),
+        Syntax::Typescript(Default::default()),
+    );
+    assert_eq!(DebugUsingDisplay(out.trim()), DebugUsingDisplay(to.trim()),);
+}
+
+#[test]
+fn issue_915_1() {
+    test_identical(r#"relResolveCacheIdentifier = `${parent.path}\x00${request}`;"#);
+}
+
+#[test]
+fn issue_915_2() {
+    test_identical(r#"relResolveCacheIdentifier = `${parent.path}\x00${request}`;"#);
+}
+
+#[test]
+fn issue_915_3() {
+    test_identical(r#"encoder.encode("\\r\\n");"#);
+}
+
+#[test]
+fn issue_915_4() {
+    test_identical(r#"`\\r\\n--${this.boundary}`;"#);
 }
 
 #[derive(Debug, Clone)]

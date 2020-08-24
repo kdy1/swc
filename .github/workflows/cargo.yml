@@ -48,8 +48,16 @@ jobs:
       - name: Install node dependencies
         run: |
           npm config set prefix ~/npm
-          npm i browserslist regenerator-runtime sourcemap-validator
+          npm i browserslist regenerator-runtime sourcemap-validator progress
           npm i -g jest
+
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/
+            **/target/
+          key: ${{ runner.os }}-cargo-test
 
       # Ensure that all components all compilable.
       - name: Run cargo check for all targets
@@ -63,7 +71,7 @@ jobs:
       - name: Run cargo test
         run: |
           export PATH="$PATH:$HOME/npm/bin"
-          cargo test --color always --all
+          cargo test --color always --all --exclude swc_ecma_parser
 
   #
   deploy-docs:

@@ -1,20 +1,18 @@
 use super::{pat::PatType, *};
-use crate::{error::SyntaxError, make_span};
+use crate::error::SyntaxError;
 use swc_atoms::js_word;
 use swc_common::Spanned;
-#[cfg(test)]
-use testing::assert_eq_ignore_span;
 
 mod module_item;
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
+impl<'a, I: Tokens> Parser<I> {
     pub(super) fn parse_block_body<Type>(
         &mut self,
         mut allow_directives: bool,
         top_level: bool,
         end: Option<&Token>,
-    ) -> PResult<'a, Vec<Type>>
+    ) -> PResult<Vec<Type>>
     where
         Self: StmtLikeParser<'a, Type>,
         Type: IsDirective + From<Stmt>,
@@ -60,18 +58,18 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(stmts)
     }
 
-    pub fn parse_stmt(&mut self, top_level: bool) -> PResult<'a, Stmt> {
+    pub fn parse_stmt(&mut self, top_level: bool) -> PResult<Stmt> {
         trace_cur!(parse_stmt);
         self.parse_stmt_like(false, top_level)
     }
 
-    fn parse_stmt_list_item(&mut self, top_level: bool) -> PResult<'a, Stmt> {
+    fn parse_stmt_list_item(&mut self, top_level: bool) -> PResult<Stmt> {
         trace_cur!(parse_stmt_list_item);
         self.parse_stmt_like(true, top_level)
     }
 
     /// Parse a statement, declaration or module item.
-    fn parse_stmt_like<Type>(&mut self, include_decl: bool, top_level: bool) -> PResult<'a, Type>
+    fn parse_stmt_like<Type>(&mut self, include_decl: bool, top_level: bool) -> PResult<Type>
     where
         Self: StmtLikeParser<'a, Type>,
         Type: IsDirective + From<Stmt>,
@@ -96,7 +94,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         include_decl: bool,
         top_level: bool,
         decorators: Vec<Decorator>,
-    ) -> PResult<'a, Stmt> {
+    ) -> PResult<Stmt> {
         trace_cur!(parse_stmt_internal);
 
         if top_level && is!("await") {
@@ -174,7 +172,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
 
         if is!("function") {
             if !include_decl {
-                unexpected!()
+                self.emit_err(self.input.cur_span(), SyntaxError::DeclNotAllowed);
             }
 
             return self.parse_fn_decl(decorators).map(Stmt::from);
@@ -182,7 +180,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
 
         if is!("class") {
             if !include_decl {
-                unexpected!()
+                self.emit_err(self.input.cur_span(), SyntaxError::DeclNotAllowed);
             }
             return self
                 .parse_class_decl(start, start, decorators)
@@ -370,7 +368,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }
     }
 
-    fn parse_if_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_if_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         assert_and_bump!("if");
@@ -415,7 +413,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }))
     }
 
-    fn parse_return_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_return_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         let stmt = self.parse_with(|p| {
@@ -441,7 +439,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn parse_switch_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_switch_stmt(&mut self) -> PResult<Stmt> {
         let switch_start = cur_pos!();
 
         assert_and_bump!("switch");
@@ -465,8 +463,15 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 let is_case = is!("case");
                 let case_start = cur_pos!();
                 bump!();
+                let ctx = Context {
+                    in_case_cond: true,
+                    ..p.ctx()
+                };
                 let test = if is_case {
-                    p.include_in_expr(true).parse_expr().map(Some)?
+                    p.with_ctx(ctx)
+                        .include_in_expr(true)
+                        .parse_expr()
+                        .map(Some)?
                 } else {
                     if let Some(previous) = span_of_previous_default {
                         syntax_error!(SyntaxError::MultipleDefault { previous });
@@ -501,7 +506,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }))
     }
 
-    fn parse_throw_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_throw_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         assert_and_bump!("throw");
@@ -518,7 +523,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(Stmt::Throw(ThrowStmt { span, arg }))
     }
 
-    fn parse_try_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_try_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
         assert_and_bump!("try");
 
@@ -541,7 +546,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }))
     }
 
-    fn parse_catch_clause(&mut self) -> PResult<'a, Option<CatchClause>> {
+    fn parse_catch_clause(&mut self) -> PResult<Option<CatchClause>> {
         let start = cur_pos!();
 
         Ok(if eat!("catch") {
@@ -559,7 +564,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         })
     }
 
-    fn parse_finally_block(&mut self) -> PResult<'a, Option<BlockStmt>> {
+    fn parse_finally_block(&mut self) -> PResult<Option<BlockStmt>> {
         Ok(if eat!("finally") {
             self.parse_block(false).map(Some)?
         } else {
@@ -568,9 +573,11 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     /// It's optional since es2019
-    fn parse_catch_param(&mut self) -> PResult<'a, Option<Pat>> {
+    fn parse_catch_param(&mut self) -> PResult<Option<Pat>> {
         if eat!('(') {
-            let pat = self.parse_binding_pat_or_ident()?;
+            let mut pat = self.parse_binding_pat_or_ident()?;
+
+            let type_ann_start = cur_pos!();
 
             if self.syntax().typescript() && eat!(':') {
                 let ctx = Context {
@@ -579,7 +586,22 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 };
 
                 let ty = self.with_ctx(ctx).parse_with(|p| p.parse_ts_type())?;
-                self.emit_err(ty.span(), SyntaxError::TS1196);
+                // self.emit_err(ty.span(), SyntaxError::TS1196);
+
+                match &mut pat {
+                    Pat::Ident(Ident { type_ann, .. })
+                    | Pat::Array(ArrayPat { type_ann, .. })
+                    | Pat::Rest(RestPat { type_ann, .. })
+                    | Pat::Object(ObjectPat { type_ann, .. })
+                    | Pat::Assign(AssignPat { type_ann, .. }) => {
+                        *type_ann = Some(TsTypeAnn {
+                            span: span!(type_ann_start),
+                            type_ann: ty,
+                        });
+                    }
+                    Pat::Invalid(_) => {}
+                    Pat::Expr(_) => {}
+                }
             }
             expect!(')');
             Ok(Some(pat))
@@ -588,7 +610,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }
     }
 
-    pub(super) fn parse_var_stmt(&mut self, for_loop: bool) -> PResult<'a, VarDecl> {
+    pub(super) fn parse_var_stmt(&mut self, for_loop: bool) -> PResult<VarDecl> {
         let start = cur_pos!();
         let kind = match bump!() {
             tok!("const") => VarDeclKind::Const,
@@ -629,9 +651,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                         decls: vec![],
                     });
                 }
-                Err(mut err) => {
-                    err.cancel();
-                }
+                Err(..) => {}
                 _ => {}
             }
         }
@@ -658,10 +678,10 @@ impl<'a, I: Tokens> Parser<'a, I> {
             // NewLine is ok
             if is_exact!(';') || eof!() {
                 let prev_span = self.input.prev_span();
-                let span = if prev_span == var_span.data() {
+                let span = if prev_span == var_span {
                     Span::new(prev_span.hi, prev_span.hi, Default::default())
                 } else {
-                    make_span(prev_span)
+                    prev_span
                 };
                 self.emit_err(span, SyntaxError::TS1009);
                 break;
@@ -674,10 +694,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
             if !eat!(';') {
                 self.emit_err(self.input.cur_span(), SyntaxError::TS1005);
 
-                let _ = self.parse_expr().map_err(|mut e| {
-                    e.emit();
-                    ()
-                });
+                let _ = self.parse_expr();
 
                 while !eat!(';') {
                     bump!();
@@ -693,7 +710,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         })
     }
 
-    fn parse_var_declarator(&mut self, for_loop: bool) -> PResult<'a, VarDeclarator> {
+    fn parse_var_declarator(&mut self, for_loop: bool) -> PResult<VarDeclarator> {
         let start = cur_pos!();
 
         let mut name = self.parse_binding_pat_or_ident()?;
@@ -765,7 +782,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn parse_do_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_do_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         assert_and_bump!("do");
@@ -788,7 +805,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(Stmt::DoWhile(DoWhileStmt { span, test, body }))
     }
 
-    fn parse_while_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_while_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         assert_and_bump!("while");
@@ -808,7 +825,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(Stmt::While(WhileStmt { span, test, body }))
     }
 
-    fn parse_with_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_with_stmt(&mut self) -> PResult<Stmt> {
         if self.syntax().typescript() {
             let span = self.input.cur_span();
             self.emit_err(span, SyntaxError::TS2410);
@@ -837,7 +854,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(Stmt::With(WithStmt { span, obj, body }))
     }
 
-    pub(super) fn parse_block(&mut self, allow_directives: bool) -> PResult<'a, BlockStmt> {
+    pub(super) fn parse_block(&mut self, allow_directives: bool) -> PResult<BlockStmt> {
         let start = cur_pos!();
 
         expect!('{');
@@ -848,7 +865,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(BlockStmt { span, stmts })
     }
 
-    fn parse_labelled_stmt(&mut self, l: Ident) -> PResult<'a, Stmt> {
+    fn parse_labelled_stmt(&mut self, l: Ident) -> PResult<Stmt> {
         let ctx = Context {
             is_break_allowed: true,
             ..self.ctx()
@@ -898,7 +915,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         })
     }
 
-    fn parse_for_stmt(&mut self) -> PResult<'a, Stmt> {
+    fn parse_for_stmt(&mut self) -> PResult<Stmt> {
         let start = cur_pos!();
 
         assert_and_bump!("for");
@@ -955,7 +972,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         })
     }
 
-    fn parse_for_head(&mut self) -> PResult<'a, ForHead> {
+    fn parse_for_head(&mut self) -> PResult<ForHead> {
         let start = cur_pos!();
         let strict = self.ctx().strict;
 
@@ -1032,7 +1049,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         self.parse_normal_for_head(Some(VarDeclOrExpr::Expr(init)))
     }
 
-    fn parse_for_each_head(&mut self, left: VarDeclOrPat) -> PResult<'a, ForHead> {
+    fn parse_for_each_head(&mut self, left: VarDeclOrPat) -> PResult<ForHead> {
         let of = bump!() == tok!("of");
         if of {
             let right = self.include_in_expr(true).parse_assignment_expr()?;
@@ -1043,7 +1060,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }
     }
 
-    fn parse_normal_for_head(&mut self, init: Option<VarDeclOrExpr>) -> PResult<'a, ForHead> {
+    fn parse_normal_for_head(&mut self, init: Option<VarDeclOrExpr>) -> PResult<ForHead> {
         let test = if eat_exact!(';') {
             None
         } else {
@@ -1106,12 +1123,12 @@ pub(super) trait StmtLikeParser<'a, Type: IsDirective> {
         &mut self,
         top_level: bool,
         decorators: Vec<Decorator>,
-    ) -> PResult<'a, Type>;
+    ) -> PResult<Type>;
 }
 
 #[parser]
-impl<'a, I: Tokens> StmtLikeParser<'a, Stmt> for Parser<'a, I> {
-    fn handle_import_export(&mut self, top_level: bool, _: Vec<Decorator>) -> PResult<'a, Stmt> {
+impl<'a, I: Tokens> StmtLikeParser<'a, Stmt> for Parser<I> {
+    fn handle_import_export(&mut self, top_level: bool, _: Vec<Decorator>) -> PResult<Stmt> {
         let start = cur_pos!();
         if self.input.syntax().dynamic_import() && is!("import") {
             let expr = self.parse_expr()?;
@@ -1144,30 +1161,19 @@ impl<'a, I: Tokens> StmtLikeParser<'a, Stmt> for Parser<'a, I> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EsConfig;
-    use swc_common::DUMMY_SP as span;
+    use crate::{EsConfig, TsConfig};
+    use swc_common::{comments::SingleThreadedComments, DUMMY_SP as span};
+    use swc_ecma_visit::assert_eq_ignore_span;
 
     fn stmt(s: &'static str) -> Stmt {
-        test_parser(s, Syntax::default(), |p| {
-            p.parse_stmt(true).map_err(|mut e| {
-                e.emit();
-            })
-        })
+        test_parser(s, Syntax::default(), |p| p.parse_stmt(true))
     }
 
     fn module_item(s: &'static str) -> ModuleItem {
-        test_parser(s, Syntax::default(), |p| {
-            p.parse_stmt_like(true, true).map_err(|mut e| {
-                e.emit();
-            })
-        })
+        test_parser(s, Syntax::default(), |p| p.parse_stmt_like(true, true))
     }
     fn expr(s: &'static str) -> Box<Expr> {
-        test_parser(s, Syntax::default(), |p| {
-            p.parse_expr().map_err(|mut e| {
-                e.emit();
-            })
-        })
+        test_parser(s, Syntax::default(), |p| p.parse_expr())
     }
 
     #[test]
@@ -1199,7 +1205,7 @@ mod tests {
                         props: vec![ObjectPatProp::Rest(RestPat {
                             span,
                             dot3_token: span,
-                            arg: box Pat::Ident(Ident::new("a34".into(), span)),
+                            arg: Box::new(Pat::Ident(Ident::new("a34".into(), span))),
                             type_ann: None
                         })],
                         type_ann: None,
@@ -1244,9 +1250,9 @@ mod tests {
                     }],
                     declare: false,
                 }),
-                right: box Expr::Ident(Ident::new("b".into(), span)),
+                right: Box::new(Expr::Ident(Ident::new("b".into(), span))),
 
-                body: box Stmt::Empty(EmptyStmt { span })
+                body: Box::new(Stmt::Empty(EmptyStmt { span })),
             })
         )
     }
@@ -1278,8 +1284,8 @@ mod tests {
             Stmt::If(IfStmt {
                 span,
                 test: expr("a"),
-                cons: box stmt("b;"),
-                alt: Some(box stmt("c")),
+                cons: Box::new(stmt("b;")),
+                alt: Some(Box::new(stmt("c"))),
             })
         );
     }
@@ -1297,9 +1303,7 @@ mod tests {
                     decorators: true,
                     ..Default::default()
                 }),
-                |p| p.parse_stmt_list_item(true).map_err(|mut e| {
-                    e.emit();
-                }),
+                |p| p.parse_stmt_list_item(true),
             ),
             Stmt::Decl(Decl::Class(ClassDecl {
                 ident: Ident::new("Foo".into(), span),
@@ -1346,11 +1350,7 @@ ReactDOM.render(<App />, document.getElementById('root'))
                 jsx: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1369,11 +1369,7 @@ export default App"#;
                 jsx: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1386,11 +1382,7 @@ export default App"#;
                 export_default_from: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1403,11 +1395,7 @@ export default App"#;
                 export_default_from: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1420,11 +1408,7 @@ export default App"#;
                 export_default_from: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1437,11 +1421,7 @@ export default App"#;
                 export_default_from: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1453,11 +1433,7 @@ export default App"#;
             Syntax::Es(EsConfig {
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1470,11 +1446,7 @@ let x = 4";
             Syntax::Es(EsConfig {
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1485,11 +1457,7 @@ let x = 4";
             Syntax::Es(EsConfig {
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1502,11 +1470,7 @@ let x = 4";
                 export_namespace_from: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1518,11 +1482,7 @@ export default function waitUntil(callback, options = {}) {
   var timeout = 'timeout' in options ? options.timeout : 1000;
 }",
             Default::default(),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1534,11 +1494,7 @@ export default function waitUntil(callback, options = {}) {
   let timeout = 'timeout' in options ? options.timeout : 1000;
 }",
             Default::default(),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1547,11 +1503,7 @@ export default function waitUntil(callback, options = {}) {
         test_parser(
             ";(function() {})(window, window.lib || (window.lib = {}))",
             Default::default(),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1569,9 +1521,7 @@ export default function waitUntil(callback, options = {}) {
     #[test]
     fn issue_340_fn() {
         test_parser("export default function(){};", Default::default(), |p| {
-            p.parse_module().map_err(|mut e| {
-                e.emit();
-            })
+            p.parse_module()
         });
     }
 
@@ -1580,29 +1530,21 @@ export default function waitUntil(callback, options = {}) {
         test_parser(
             "export default async function(){};",
             Default::default(),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
     #[test]
     fn issue_340_generator_fn() {
         test_parser("export default function*(){};", Default::default(), |p| {
-            p.parse_module().map_err(|mut e| {
-                e.emit();
-            })
+            p.parse_module()
         });
     }
 
     #[test]
     fn issue_340_class() {
         test_parser("export default class {};", Default::default(), |p| {
-            p.parse_module().map_err(|mut e| {
-                e.emit();
-            })
+            p.parse_module()
         });
     }
 
@@ -1611,11 +1553,7 @@ export default function waitUntil(callback, options = {}) {
         test_parser(
             "var IS_IE11 = !global.ActiveXObject && 'ActiveXObject' in global;",
             Default::default(),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1627,11 +1565,7 @@ export default function waitUntil(callback, options = {}) {
                 dynamic_import: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1648,11 +1582,7 @@ export default function waitUntil(callback, options = {}) {
                 dynamic_import: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1664,11 +1594,7 @@ export default function waitUntil(callback, options = {}) {
             Syntax::Es(EsConfig {
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
     }
 
@@ -1680,11 +1606,105 @@ export default function waitUntil(callback, options = {}) {
                 top_level_await: true,
                 ..Default::default()
             }),
-            |p| {
-                p.parse_module().map_err(|mut e| {
-                    e.emit();
-                })
-            },
+            |p| p.parse_module(),
         );
+    }
+
+    #[test]
+    fn issue_856() {
+        let c = SingleThreadedComments::default();
+        let s = "class Foo {
+    static _extensions: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [key: string]: (module: Module, filename: string) => any;
+    } = Object.create(null);
+}
+";
+        let _ = test_parser_comment(
+            &c,
+            s,
+            Syntax::Typescript(TsConfig {
+                ..Default::default()
+            }),
+            |p| p.parse_typescript_module(),
+        );
+
+        let (leading, trailing) = c.take_all();
+        assert!(trailing.borrow().is_empty());
+        assert_eq!(leading.borrow().len(), 1);
+    }
+
+    #[test]
+    fn issue_856_2() {
+        let c = SingleThreadedComments::default();
+        let s = "type ConsoleExamineFunc = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  csl: any,
+  out: StringBuffer,
+  err?: StringBuffer,
+  both?: StringBuffer
+) => void;";
+
+        let _ = test_parser_comment(
+            &c,
+            s,
+            Syntax::Typescript(TsConfig {
+                ..Default::default()
+            }),
+            |p| p.parse_typescript_module(),
+        );
+
+        let (leading, trailing) = c.take_all();
+        assert!(trailing.borrow().is_empty());
+        assert_eq!(leading.borrow().len(), 1);
+    }
+
+    #[test]
+    fn issue_856_3() {
+        let c = SingleThreadedComments::default();
+        let s = "type RequireWrapper = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  exports: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  require: any,
+  module: Module,
+  __filename: string,
+  __dirname: string
+) => void;";
+
+        let _ = test_parser_comment(
+            &c,
+            s,
+            Syntax::Typescript(TsConfig {
+                ..Default::default()
+            }),
+            |p| p.parse_typescript_module(),
+        );
+
+        let (leading, trailing) = c.take_all();
+        assert!(trailing.borrow().is_empty());
+        assert_eq!(leading.borrow().len(), 2);
+    }
+
+    #[test]
+    fn issue_856_4() {
+        let c = SingleThreadedComments::default();
+        let s = "const _extensions: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [key: string]: (module: Module, filename: string) => any;
+  } = Object.create(null);";
+
+        let _ = test_parser_comment(
+            &c,
+            s,
+            Syntax::Typescript(TsConfig {
+                ..Default::default()
+            }),
+            |p| p.parse_typescript_module(),
+        );
+
+        let (leading, trailing) = c.take_all();
+        assert!(trailing.borrow().is_empty());
+        assert_eq!(leading.borrow().len(), 1);
     }
 }

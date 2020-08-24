@@ -1,10 +1,7 @@
 use enum_kind::Kind;
 use string_enum::StringEnum;
-#[cfg(feature = "fold")]
-use swc_common::Fold;
 
 #[derive(Kind, StringEnum, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 #[kind(function(precedence = "u8"))]
 pub enum BinaryOp {
     /// `==`
@@ -92,7 +89,6 @@ pub enum BinaryOp {
 }
 
 #[derive(StringEnum, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 pub enum AssignOp {
     /// `=`
     Assign,
@@ -121,10 +117,18 @@ pub enum AssignOp {
 
     /// `**=`
     ExpAssign,
+
+    /// `&&=`
+    AndAssign,
+
+    /// `||=`
+    OrAssign,
+
+    /// `??=`
+    NullishAssign,
 }
 
 #[derive(StringEnum, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 pub enum UpdateOp {
     /// `++`
     PlusPlus,
@@ -133,7 +137,6 @@ pub enum UpdateOp {
 }
 
 #[derive(StringEnum, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 pub enum UnaryOp {
     /// `-`
     Minus,

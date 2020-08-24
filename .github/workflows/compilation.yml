@@ -1,0 +1,48 @@
+name: Compilation
+
+on: [push, pull_request]
+#on:
+#  push:
+#    # Ignore commits created by bors
+#    branches-ignore:
+#      - 'staging'
+#      - 'trying'
+#  pull_request:
+#    branches-ignore:
+#      - 'staging'
+#      - 'trying'
+
+env:
+  CARGO_INCREMENTAL: 0
+  CI: "1"
+  SKIP_SWC_BINARY_DOWNLOAD_FOR_CI: 1
+
+jobs:
+  check:
+    name: compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/
+          key: ${{ runner.os }}-cargo-compliation
+
+      - name: Install cargo hack
+        run: |
+          cargo install cargo-hack --version 0.3.11
+
+      - name: Check swc_common
+        run: |
+          (cd common && cargo hack check --feature-powerset --no-dev-deps)
+
+      - name: Check swc_ecma_transforms
+        run: |
+          (cd ecmascript/transforms && cargo hack check --feature-powerset --no-dev-deps)
+
+      - name: Check swc_bundler
+        run: |
+          (cd bundler && cargo hack check --feature-powerset --no-dev-deps)

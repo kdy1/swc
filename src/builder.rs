@@ -2,29 +2,26 @@ use crate::config::{GlobalPassOption, JscTarget, ModuleConfig};
 use either::Either;
 use std::{collections::HashMap, sync::Arc};
 use swc_atoms::JsWord;
-use swc_common::{chain, errors::Handler, fold::and_then::AndThen, Mark, SourceMap};
-use swc_ecmascript::{
-    parser::Syntax,
-    preset_env,
-    transforms::{
-        compat, const_modules, fixer, helpers, hygiene, modules,
-        pass::{Optional, Pass},
-        typescript,
-    },
+use swc_common::{chain, comments::Comments, errors::Handler, Mark, SourceMap};
+use swc_ecma_parser::Syntax;
+use swc_ecma_transforms::{
+    compat, const_modules, fixer, helpers, hygiene, modules, pass::Optional, typescript,
 };
 
 /// Builder is used to create a high performance `Compiler`.
-pub struct PassBuilder<'a, 'b, P: Pass> {
+pub struct PassBuilder<'a, 'b, P: swc_ecma_visit::Fold> {
     cm: &'a Arc<SourceMap>,
     handler: &'b Handler,
-    env: Option<preset_env::Config>,
+    env: Option<swc_ecma_preset_env::Config>,
     pass: P,
     global_mark: Mark,
     target: JscTarget,
     loose: bool,
+    hygiene: bool,
+    fixer: bool,
 }
 
-impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
+impl<'a, 'b, P: swc_ecma_visit::Fold> PassBuilder<'a, 'b, P> {
     pub fn new(
         cm: &'a Arc<SourceMap>,
         handler: &'b Handler,
@@ -39,11 +36,16 @@ impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
             target: JscTarget::Es5,
             global_mark,
             loose,
+            hygiene: true,
             env: None,
+            fixer: true,
         }
     }
 
-    pub fn then<N>(self, next: N) -> PassBuilder<'a, 'b, AndThen<P, N>> {
+    pub fn then<N>(self, next: N) -> PassBuilder<'a, 'b, swc_visit::AndThen<P, N>>
+    where
+        N: swc_ecma_visit::Fold,
+    {
         let pass = chain!(self.pass, next);
         PassBuilder {
             cm: self.cm,
@@ -51,25 +53,39 @@ impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
             pass,
             target: self.target,
             loose: self.loose,
+            hygiene: self.hygiene,
             env: self.env,
             global_mark: self.global_mark,
+            fixer: self.fixer,
         }
+    }
+
+    /// Note: fixer is enabled by default.
+    pub fn fixer(mut self, enable: bool) -> Self {
+        self.fixer = enable;
+        self
+    }
+
+    /// Note: hygiene is enabled by default.
+    pub fn hygiene(mut self, enable: bool) -> Self {
+        self.hygiene = enable;
+        self
     }
 
     pub fn const_modules(
         self,
         globals: HashMap<JsWord, HashMap<JsWord, String>>,
-    ) -> PassBuilder<'a, 'b, impl Pass> {
-        self.then(const_modules(globals))
+    ) -> PassBuilder<'a, 'b, impl swc_ecma_visit::Fold> {
+        let cm = self.cm.clone();
+        self.then(const_modules(cm, globals))
     }
 
-    pub fn inline_globals(self, c: GlobalPassOption) -> PassBuilder<'a, 'b, impl Pass> {
+    pub fn inline_globals(
+        self,
+        c: GlobalPassOption,
+    ) -> PassBuilder<'a, 'b, impl swc_ecma_visit::Fold> {
         let pass = c.build(&self.cm, &self.handler);
         self.then(pass)
-    }
-
-    pub fn strip_typescript(self) -> PassBuilder<'a, 'b, impl Pass> {
-        self.then(typescript::strip())
     }
 
     pub fn target(mut self, target: JscTarget) -> Self {
@@ -77,7 +93,7 @@ impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
         self
     }
 
-    pub fn preset_env(mut self, env: Option<preset_env::Config>) -> Self {
+    pub fn preset_env(mut self, env: Option<swc_ecma_preset_env::Config>) -> Self {
         self.env = env;
         self
     }
@@ -92,26 +108,46 @@ impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
     ///  - compatibility helper
     ///  - module handler
     ///  - helper injector
-    ///  - identifier hygiene handler
-    ///  - fixer
-    pub fn finalize(
+    ///  - identifier hygiene handler if enabled
+    ///  - fixer if enabled
+    pub fn finalize<'cmt>(
         self,
         root_mark: Mark,
         syntax: Syntax,
         module: Option<ModuleConfig>,
-    ) -> impl Pass {
+        comments: Option<&'cmt dyn Comments>,
+    ) -> impl 'cmt + swc_ecma_visit::Fold
+    where
+        P: 'cmt,
+    {
         let need_interop_analysis = match module {
             Some(ModuleConfig::CommonJs(ref c)) => !c.no_interop,
             Some(ModuleConfig::Amd(ref c)) => !c.config.no_interop,
             Some(ModuleConfig::Umd(ref c)) => !c.config.no_interop,
-            None => false,
+            Some(ModuleConfig::Es6) | None => false,
         };
 
         // compat
         let compat_pass = if let Some(env) = self.env {
-            Either::Left(preset_env::preset_env(self.global_mark, env))
+            Either::Left(chain!(
+                Optional::new(typescript::strip(), syntax.typescript()),
+                swc_ecma_preset_env::preset_env(self.global_mark, env)
+            ))
         } else {
             Either::Right(chain!(
+                Optional::new(
+                    compat::es2020::nullish_coalescing(),
+                    self.target < JscTarget::Es2020
+                ),
+                Optional::new(
+                    compat::es2020::optional_chaining(),
+                    self.target < JscTarget::Es2020
+                ),
+                Optional::new(
+                    compat::es2020::class_properties(),
+                    self.target < JscTarget::Es2020,
+                ),
+                Optional::new(typescript::strip(), syntax.typescript()),
                 Optional::new(compat::es2018(), self.target <= JscTarget::Es2018),
                 Optional::new(compat::es2017(), self.target <= JscTarget::Es2017),
                 Optional::new(compat::es2016(), self.target <= JscTarget::Es2016),
@@ -146,12 +182,10 @@ impl<'a, 'b, P: Pass> PassBuilder<'a, 'b, P> {
                 modules::import_analysis::import_analyzer(),
                 need_interop_analysis
             ),
-            helpers::InjectHelpers,
+            helpers::inject_helpers(),
             ModuleConfig::build(self.cm.clone(), root_mark, module),
-            // hygiene
-            hygiene(),
-            // fixer
-            fixer(),
+            Optional::new(hygiene(), self.hygiene),
+            Optional::new(fixer(comments), self.fixer),
         )
     }
 }

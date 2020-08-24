@@ -1,10 +1,8 @@
-#![feature(box_syntax)]
-#![feature(box_patterns)]
-#![feature(specialization)]
 #![feature(test)]
 
 extern crate test;
 
+use crate::common::Normalizer;
 use pretty_assertions::assert_eq;
 use std::{
     env,
@@ -12,16 +10,17 @@ use std::{
     io::{self, Read},
     path::Path,
 };
-use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
-use swc_ecma_parser::{
-    lexer::Lexer, JscTarget, PResult, Parser, Session, SourceFileInput, Syntax, TsConfig,
-};
+use swc_ecma_parser::{lexer::Lexer, JscTarget, PResult, Parser, StringInput, Syntax, TsConfig};
+use swc_ecma_visit::FoldWith;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
 use testing::StdErr;
 use walkdir::WalkDir;
+
+#[path = "common/mod.rs"]
+mod common;
 
 fn add_test<F: FnOnce() + Send + 'static>(
     tests: &mut Vec<TestDescAndFn>,
@@ -40,7 +39,7 @@ fn add_test<F: FnOnce() + Send + 'static>(
             should_panic: No,
             allow_fail: false,
         },
-        testfn: DynTestFn(box f),
+        testfn: DynTestFn(Box::new(f)),
     });
 }
 
@@ -101,7 +100,10 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                 .contains("tsc/es6/unicodeExtendedEscapes/unicodeExtendedEscapesInTemplates11_ES5")
             || file_name
                 .contains("tsc/es6/unicodeExtendedEscapes/unicodeExtendedEscapesInTemplates11_ES6")
-            || file_name.contains("tsc/es6/variableDeclarations/VariableDeclaration6_es6");
+            || file_name.contains("tsc/es6/variableDeclarations/VariableDeclaration6_es6")
+            || file_name.contains(
+                "tsc/parser/ecmascriptnext/numericSeparators/parser.numericSeparators.decimal",
+            );
 
         // Useful only for error reporting
         let ignore = ignore
@@ -157,7 +159,10 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                 }
             } else {
                 with_parser(is_backtrace_enabled(), &path, !errors, |p| {
-                    let module = p.parse_typescript_module()?.fold_with(&mut Normalizer);
+                    let module = p.parse_typescript_module()?.fold_with(&mut Normalizer {
+                        drop_span: false,
+                        is_test262: false,
+                    });
 
                     let json = serde_json::to_string_pretty(&module)
                         .expect("failed to serialize module as json");
@@ -169,8 +174,16 @@ fn reference_tests(tests: &mut Vec<TestDescAndFn>, errors: bool) -> Result<(), i
                         panic!()
                     }
 
+                    let module = module.fold_with(&mut Normalizer {
+                        drop_span: true,
+                        is_test262: false,
+                    });
+
                     let deser = match serde_json::from_str::<Module>(&json) {
-                        Ok(v) => v.fold_with(&mut Normalizer),
+                        Ok(v) => v.fold_with(&mut Normalizer {
+                            drop_span: true,
+                            is_test262: false,
+                        }),
                         Err(err) => {
                             if err.to_string().contains("invalid type: null, expected f64") {
                                 return Ok(());
@@ -202,7 +215,7 @@ fn with_parser<F, Ret>(
     f: F,
 ) -> Result<Ret, StdErr>
 where
-    F: for<'a> FnOnce(&mut Parser<'a, Lexer<'a, SourceFileInput<'_>>>) -> PResult<'a, Ret>,
+    F: FnOnce(&mut Parser<Lexer<StringInput<'_>>>) -> PResult<Ret>,
 {
     let fname = file_name.display().to_string();
     let output = ::testing::run_test(treat_error_as_bug, |cm, handler| {
@@ -211,7 +224,6 @@ where
             .unwrap_or_else(|e| panic!("failed to load {}: {}", file_name.display(), e));
 
         let lexer = Lexer::new(
-            Session { handler: &handler },
             Syntax::Typescript(TsConfig {
                 dts: fname.ends_with(".d.ts"),
                 tsx: fname.contains("tsx"),
@@ -225,10 +237,13 @@ where
             None,
         );
 
-        let res =
-            f(&mut Parser::new_from(Session { handler: &handler }, lexer)).map_err(|mut e| {
-                e.emit();
-            });
+        let mut p = Parser::new_from(lexer);
+
+        let res = f(&mut p).map_err(|e| e.into_diagnostic(&handler).emit());
+
+        for err in p.take_errors() {
+            err.into_diagnostic(&handler).emit();
+        }
 
         if handler.has_errors() {
             return Err(());
@@ -260,49 +275,5 @@ fn is_backtrace_enabled() -> bool {
     match ::std::env::var("RUST_BACKTRACE") {
         Ok(val) => val == "1" || val == "full",
         _ => false,
-    }
-}
-
-struct Normalizer;
-
-impl Fold<PatOrExpr> for Normalizer {
-    fn fold(&mut self, node: PatOrExpr) -> PatOrExpr {
-        let node = node.fold_children(self);
-
-        match node {
-            PatOrExpr::Pat(box Pat::Expr(e)) => PatOrExpr::Expr(e),
-            PatOrExpr::Expr(box Expr::Ident(i)) => PatOrExpr::Pat(box Pat::Ident(i)),
-            _ => node,
-        }
-    }
-}
-
-impl Fold<PropName> for Normalizer {
-    fn fold(&mut self, node: PropName) -> PropName {
-        let node = node.fold_children(self);
-
-        match node {
-            PropName::Computed(ComputedPropName {
-                expr: box Expr::Lit(ref l),
-                ..
-            }) => match l {
-                Lit::Str(s) => s.clone().into(),
-                Lit::Num(v) => v.clone().into(),
-
-                _ => node,
-            },
-
-            _ => node,
-        }
-    }
-}
-
-/// We are not debugging serde_json
-impl Fold<Number> for Normalizer {
-    fn fold(&mut self, mut node: Number) -> Number {
-        node.value =
-            serde_json::from_str(&serde_json::to_string(&node.value).unwrap()).unwrap_or(f64::NAN);
-
-        node
     }
 }

@@ -1,23 +1,26 @@
 use crate::{
-    pass::Pass,
-    util::{ExprFactory, COMMENTS},
+    ext::{AsOptExpr, PatOrExprExt},
+    util::ExprFactory,
 };
 use fxhash::FxHashMap;
 use swc_common::{
+    comments::Comments,
     util::{map::Map, move_map::MoveMap},
-    Fold, FoldWith, Span, Spanned,
+    Span, Spanned,
 };
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
 
-pub fn fixer() -> impl Pass {
+pub fn fixer<'a>(comments: Option<&'a dyn Comments>) -> impl 'a + Fold {
     Fixer {
+        comments,
         ctx: Default::default(),
         span_map: Default::default(),
     }
 }
 
-#[derive(Debug)]
-struct Fixer {
+struct Fixer<'a> {
+    comments: Option<&'a dyn Comments>,
     ctx: Context,
     /// A hash map to preserve original span.
     ///
@@ -25,8 +28,6 @@ struct Fixer {
     /// expression.
     span_map: FxHashMap<Span, Span>,
 }
-
-noop_fold_type!(Fixer);
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,27 +54,496 @@ impl Default for Context {
     }
 }
 
-impl Fold<Program> for Fixer {
-    fn fold(&mut self, p: Program) -> Program {
-        debug_assert!(self.span_map.is_empty());
-        self.span_map.clear();
+macro_rules! array {
+    ($name:ident, $T:tt) => {
+        fn $name(&mut self, e: $T) -> $T {
+            let old = self.ctx;
+            self.ctx = Context::ForcedExpr { is_var_decl: false }.into();
+            let elems = e.elems.fold_with(self);
+            self.ctx = old;
 
-        let p = p.fold_children(self);
-
-        COMMENTS.with(|c| {
-            for (to, from) in self.span_map.drain() {
-                let (from, to) = (from.data(), to.data());
-                c.move_leading(from.lo, to.lo);
-                c.move_trailing(from.hi, to.hi);
-            }
-        });
-
-        p
-    }
+            $T { elems, ..e }
+        }
+    };
 }
 
-impl Fold<KeyValuePatProp> for Fixer {
-    fn fold(&mut self, node: KeyValuePatProp) -> KeyValuePatProp {
+impl Fold for Fixer<'_> {
+    noop_fold_type!();
+
+    array!(fold_array_lit, ArrayLit);
+    // array!(ArrayPat);
+
+    fn fold_new_expr(&mut self, node: NewExpr) -> NewExpr {
+        let NewExpr {
+            span,
+            mut callee,
+            args,
+            type_args,
+        } = node;
+
+        let old = self.ctx;
+        self.ctx = Context::ForcedExpr { is_var_decl: false };
+        let args = args.fold_with(self);
+        self.ctx = old;
+
+        let old = self.ctx;
+        self.ctx = Context::Callee { is_new: true };
+        callee = callee.fold_with(self);
+        match *callee {
+            Expr::Call(..) => callee = Box::new(self.wrap(*callee)),
+            _ => {}
+        }
+        self.ctx = old;
+
+        NewExpr {
+            span,
+            callee,
+            args,
+            type_args,
+        }
+    }
+
+    fn fold_call_expr(&mut self, node: CallExpr) -> CallExpr {
+        let CallExpr {
+            span,
+            callee,
+            args,
+            type_args,
+        } = node;
+
+        let old = self.ctx;
+        self.ctx = Context::ForcedExpr { is_var_decl: false };
+        let args = args.fold_with(self);
+        self.ctx = old;
+
+        let old = self.ctx;
+        self.ctx = Context::Callee { is_new: false };
+        let callee = callee.fold_with(self);
+        self.ctx = old;
+
+        CallExpr {
+            span,
+            callee,
+            args,
+            type_args,
+        }
+    }
+
+    fn fold_arrow_expr(&mut self, node: ArrowExpr) -> ArrowExpr {
+        let old = self.ctx;
+        self.ctx = Context::Default;
+        let mut node = node.fold_children_with(self);
+        node.body = match node.body {
+            BlockStmtOrExpr::Expr(e) if e.is_seq() => {
+                BlockStmtOrExpr::Expr(Box::new(self.wrap(*e)))
+            }
+            _ => node.body,
+        };
+        self.ctx = old;
+        node
+    }
+
+    fn fold_assign_pat_prop(&mut self, node: AssignPatProp) -> AssignPatProp {
+        let key = node.key.fold_children_with(self);
+
+        let old = self.ctx;
+        self.ctx = Context::ForcedExpr { is_var_decl: false };
+        let value = node.value.fold_with(self);
+        self.ctx = old;
+
+        AssignPatProp { key, value, ..node }
+    }
+
+    fn fold_block_stmt_or_expr(&mut self, body: BlockStmtOrExpr) -> BlockStmtOrExpr {
+        let body = body.fold_children_with(self);
+
+        match body {
+            BlockStmtOrExpr::Expr(expr) if expr.is_object() => {
+                BlockStmtOrExpr::Expr(Box::new(self.wrap(*expr)))
+            }
+
+            _ => body,
+        }
+    }
+
+    fn fold_class(&mut self, node: Class) -> Class {
+        let old = self.ctx;
+        self.ctx = Context::Default;
+        let mut node: Class = node.fold_children_with(self);
+        node.super_class = match node.super_class {
+            Some(e) if e.is_seq() || e.is_await_expr() => Some(Box::new(self.wrap(*e))),
+            _ => node.super_class,
+        };
+        self.ctx = old;
+
+        node.body.retain(|m| match m {
+            ClassMember::Empty(..) => false,
+            _ => true,
+        });
+
+        node
+    }
+
+    fn fold_export_default_expr(&mut self, node: ExportDefaultExpr) -> ExportDefaultExpr {
+        let old = self.ctx;
+        self.ctx = Context::Default;
+        let mut node = node.fold_children_with(self);
+        node.expr = match *node.expr {
+            Expr::Arrow(..) | Expr::Seq(..) => Box::new(self.wrap(*node.expr)),
+            _ => node.expr,
+        };
+        self.ctx = old;
+        node
+    }
+
+    fn fold_expr(&mut self, expr: Expr) -> Expr {
+        let expr = expr.fold_children_with(self);
+        let expr = self.unwrap_expr(expr);
+
+        match expr {
+            Expr::Member(MemberExpr {
+                span,
+                computed,
+                obj,
+                prop,
+            }) if obj.as_expr().map(|e| e.is_object()).unwrap_or(false)
+                && match self.ctx {
+                    Context::ForcedExpr { is_var_decl: true } => true,
+                    _ => false,
+                } =>
+            {
+                MemberExpr {
+                    span,
+                    computed,
+                    obj,
+                    prop,
+                }
+                .into()
+            }
+
+            Expr::Member(MemberExpr {
+                span,
+                computed,
+                obj: ExprOrSuper::Expr(obj),
+                prop,
+            }) if obj.is_fn_expr()
+                || obj.is_cond()
+                || obj.is_unary()
+                || obj.is_seq()
+                || obj.is_update()
+                || obj.is_bin()
+                || obj.is_object()
+                || obj.is_assign()
+                || obj.is_arrow()
+                || obj.is_class()
+                || obj.is_yield_expr()
+                || obj.is_await_expr()
+                || match *obj {
+                    Expr::New(NewExpr { args: None, .. }) => true,
+                    _ => false,
+                } =>
+            {
+                MemberExpr {
+                    span,
+                    computed,
+                    obj: self.wrap(*obj).as_obj(),
+                    prop,
+                }
+                .into()
+            }
+
+            // Flatten seq expr
+            Expr::Seq(SeqExpr { span, exprs }) => {
+                let len = exprs
+                    .iter()
+                    .map(|expr| match **expr {
+                        Expr::Seq(SeqExpr { ref exprs, .. }) => exprs.len(),
+                        _ => 1,
+                    })
+                    .sum();
+
+                let exprs_len = exprs.len();
+                let expr = if len == exprs_len {
+                    let mut exprs = exprs
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(i, e)| {
+                            let is_last = i + 1 == exprs_len;
+                            if is_last {
+                                Some(e)
+                            } else {
+                                ignore_return_value(e)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    if exprs.len() == 1 {
+                        return *exprs.pop().unwrap();
+                    }
+                    Expr::Seq(SeqExpr { span, exprs })
+                } else {
+                    let mut buf = Vec::with_capacity(len);
+                    for (i, expr) in exprs.into_iter().enumerate() {
+                        let is_last = i + 1 == exprs_len;
+
+                        match *expr {
+                            Expr::Seq(SeqExpr { exprs, .. }) => {
+                                if !is_last {
+                                    buf.extend(exprs.into_iter().filter_map(ignore_return_value));
+                                } else {
+                                    let exprs_len = exprs.len();
+                                    for (i, expr) in exprs.into_iter().enumerate() {
+                                        let is_last = i + 1 == exprs_len;
+                                        if is_last {
+                                            buf.push(expr);
+                                        } else {
+                                            buf.extend(ignore_return_value(expr));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => buf.push(expr),
+                        }
+                    }
+
+                    if buf.len() == 1 {
+                        return *buf.pop().unwrap();
+                    }
+                    buf.shrink_to_fit();
+                    Expr::Seq(SeqExpr { span, exprs: buf })
+                };
+
+                match self.ctx {
+                    Context::ForcedExpr { .. } => Expr::Paren(ParenExpr {
+                        span,
+                        expr: Box::new(expr),
+                    }),
+                    _ => expr,
+                }
+            }
+
+            Expr::Bin(mut expr) => {
+                expr.right = match *expr.right {
+                    e @ Expr::Assign(..)
+                    | e @ Expr::Seq(..)
+                    | e @ Expr::Yield(..)
+                    | e @ Expr::Cond(..)
+                    | e @ Expr::Arrow(..) => Box::new(self.wrap(e)),
+                    Expr::Bin(BinExpr { op: op_of_rhs, .. }) => {
+                        if op_of_rhs.precedence() <= expr.op.precedence() {
+                            Box::new(self.wrap(*expr.right))
+                        } else {
+                            expr.right
+                        }
+                    }
+                    _ => expr.right,
+                };
+
+                match *expr.left {
+                    // While simplifying, (1 + x) * Nan becomes `1 + x * Nan`.
+                    // But it should be `(1 + x) * Nan`
+                    Expr::Bin(BinExpr { op: op_of_lhs, .. }) => {
+                        if op_of_lhs.precedence() < expr.op.precedence() {
+                            Expr::Bin(BinExpr {
+                                left: Box::new(self.wrap(*expr.left)),
+                                ..expr
+                            })
+                        } else {
+                            Expr::Bin(expr)
+                        }
+                    }
+
+                    e @ Expr::Seq(..)
+                    | e @ Expr::Update(..)
+                    | e
+                    @
+                    Expr::Unary(UnaryExpr {
+                        op: op!("delete"), ..
+                    })
+                    | e
+                    @
+                    Expr::Unary(UnaryExpr {
+                        op: op!("void"), ..
+                    })
+                    | e @ Expr::Yield(..)
+                    | e @ Expr::Cond(..)
+                    | e @ Expr::Assign(..)
+                    | e @ Expr::Arrow(..) => Expr::Bin(BinExpr {
+                        left: Box::new(self.wrap(e)),
+                        ..expr
+                    }),
+                    e @ Expr::Object(..)
+                        if expr.op == op!("instanceof")
+                            || expr.op == op!("==")
+                            || expr.op == op!("===")
+                            || expr.op == op!("!=")
+                            || expr.op == op!("!==") =>
+                    {
+                        Expr::Bin(BinExpr {
+                            left: Box::new(e.wrap_with_paren()),
+                            ..expr
+                        })
+                    }
+                    _ => Expr::Bin(expr),
+                }
+            }
+
+            Expr::Cond(expr) => {
+                let test = match *expr.test {
+                    e @ Expr::Seq(..)
+                    | e @ Expr::Assign(..)
+                    | e @ Expr::Cond(..)
+                    | e @ Expr::Arrow(..) => Box::new(self.wrap(e)),
+
+                    e @ Expr::Object(..) | e @ Expr::Fn(..) | e @ Expr::Class(..) => {
+                        if self.ctx == Context::Default {
+                            Box::new(self.wrap(e))
+                        } else {
+                            Box::new(e)
+                        }
+                    }
+                    _ => expr.test,
+                };
+
+                let cons = match *expr.cons {
+                    e @ Expr::Seq(..) => Box::new(self.wrap(e)),
+                    _ => expr.cons,
+                };
+
+                let alt = match *expr.alt {
+                    e @ Expr::Seq(..) => Box::new(self.wrap(e)),
+                    _ => expr.alt,
+                };
+                let expr = Expr::Cond(CondExpr {
+                    test,
+                    cons,
+                    alt,
+                    ..expr
+                });
+                match self.ctx {
+                    Context::Callee { is_new: true } => self.wrap(expr),
+                    _ => expr,
+                }
+            }
+
+            Expr::Unary(expr) => {
+                let arg = match *expr.arg {
+                    e @ Expr::Assign(..)
+                    | e @ Expr::Bin(..)
+                    | e @ Expr::Seq(..)
+                    | e @ Expr::Cond(..)
+                    | e @ Expr::Arrow(..)
+                    | e @ Expr::Yield(..) => Box::new(self.wrap(e)),
+                    _ => expr.arg,
+                };
+
+                Expr::Unary(UnaryExpr { arg, ..expr })
+            }
+
+            Expr::Assign(expr) => {
+                let right = match *expr.right {
+                    // `foo = (bar = baz)` => foo = bar = baz
+                    Expr::Assign(AssignExpr { ref left, .. }) if left.as_ident().is_some() => {
+                        expr.right
+                    }
+
+                    // Handle `foo = bar = init()
+                    Expr::Seq(right) => Box::new(self.wrap(right)),
+                    _ => expr.right,
+                };
+
+                Expr::Assign(AssignExpr { right, ..expr })
+            }
+
+            Expr::Call(CallExpr {
+                span,
+                callee: ExprOrSuper::Expr(callee),
+                args,
+                type_args,
+            }) if callee.is_arrow() => Expr::Call(CallExpr {
+                span,
+                callee: self.wrap(*callee).as_callee(),
+                args,
+                type_args,
+            }),
+
+            // Function expression cannot start with `function`
+            Expr::Call(CallExpr {
+                span,
+                callee: ExprOrSuper::Expr(callee),
+                args,
+                type_args,
+            }) if callee.is_fn_expr() => match self.ctx {
+                Context::ForcedExpr { .. } => Expr::Call(CallExpr {
+                    span,
+                    callee: callee.as_callee(),
+                    args,
+                    type_args,
+                }),
+
+                Context::Callee { is_new: true } => self.wrap(CallExpr {
+                    span,
+                    callee: callee.as_callee(),
+                    args,
+                    type_args,
+                }),
+
+                _ => Expr::Call(CallExpr {
+                    span,
+                    callee: self.wrap(*callee).as_callee(),
+                    args,
+                    type_args,
+                }),
+            },
+            Expr::Call(CallExpr {
+                span,
+                callee: ExprOrSuper::Expr(callee),
+                args,
+                type_args,
+            }) if callee.is_assign() => Expr::Call(CallExpr {
+                span,
+                callee: self.wrap(*callee).as_callee(),
+                args,
+                type_args,
+            }),
+            _ => expr,
+        }
+    }
+
+    fn fold_expr_or_spread(&mut self, e: ExprOrSpread) -> ExprOrSpread {
+        let e = e.fold_children_with(self);
+
+        if e.spread.is_none() {
+            match *e.expr {
+                Expr::Yield(..) => {
+                    return ExprOrSpread {
+                        spread: None,
+                        expr: Box::new(self.wrap(*e.expr)),
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        e
+    }
+
+    fn fold_if_stmt(&mut self, node: IfStmt) -> IfStmt {
+        let node: IfStmt = node.fold_children_with(self);
+
+        match *node.cons {
+            Stmt::If(..) => IfStmt {
+                cons: Box::new(Stmt::Block(BlockStmt {
+                    span: node.cons.span(),
+                    stmts: vec![*node.cons],
+                })),
+                ..node
+            },
+
+            _ => node,
+        }
+    }
+
+    fn fold_key_value_pat_prop(&mut self, node: KeyValuePatProp) -> KeyValuePatProp {
         let old = self.ctx;
         self.ctx = Context::ForcedExpr { is_var_decl: false };
         let key = node.key.fold_with(self);
@@ -81,52 +551,38 @@ impl Fold<KeyValuePatProp> for Fixer {
 
         let value = node.value.fold_with(self);
 
-        validate!(KeyValuePatProp { key, value })
+        KeyValuePatProp { key, value }
     }
-}
 
-impl Fold<AssignPatProp> for Fixer {
-    fn fold(&mut self, node: AssignPatProp) -> AssignPatProp {
-        let key = node.key.fold_children(self);
+    fn fold_key_value_prop(&mut self, prop: KeyValueProp) -> KeyValueProp {
+        let prop = prop.fold_children_with(self);
 
-        let old = self.ctx;
-        self.ctx = Context::ForcedExpr { is_var_decl: false };
-        let value = node.value.fold_with(self);
-        self.ctx = old;
-
-        validate!(AssignPatProp { key, value, ..node })
-    }
-}
-
-impl Fold<VarDeclarator> for Fixer {
-    fn fold(&mut self, node: VarDeclarator) -> VarDeclarator {
-        let name = node.name.fold_children(self);
-
-        let old = self.ctx;
-        self.ctx = Context::ForcedExpr { is_var_decl: true };
-        let init = node.init.fold_with(self);
-        self.ctx = old;
-
-        VarDeclarator { name, init, ..node }
-    }
-}
-
-impl Fold<BlockStmtOrExpr> for Fixer {
-    fn fold(&mut self, body: BlockStmtOrExpr) -> BlockStmtOrExpr {
-        let body = body.fold_children(self);
-
-        match body {
-            BlockStmtOrExpr::Expr(box expr @ Expr::Object(..)) => {
-                BlockStmtOrExpr::Expr(box self.wrap(expr))
-            }
-
-            _ => body,
+        match *prop.value {
+            Expr::Seq(..) => KeyValueProp {
+                value: Box::new(self.wrap(*prop.value)),
+                ..prop
+            },
+            _ => prop,
         }
     }
-}
 
-impl Fold<Stmt> for Fixer {
-    fn fold(&mut self, stmt: Stmt) -> Stmt {
+    fn fold_prop_name(&mut self, mut name: PropName) -> PropName {
+        name = name.fold_children_with(self);
+
+        match name {
+            PropName::Computed(c) if c.expr.is_seq() => {
+                return PropName::Computed(ComputedPropName {
+                    span: c.span,
+                    expr: Box::new(self.wrap(*c.expr)),
+                });
+            }
+            _ => {}
+        }
+
+        name
+    }
+
+    fn fold_stmt(&mut self, stmt: Stmt) -> Stmt {
         let stmt = match stmt {
             Stmt::Expr(expr) => {
                 let old = self.ctx;
@@ -135,7 +591,7 @@ impl Fold<Stmt> for Fixer {
                 self.ctx = old;
                 Stmt::Expr(expr)
             }
-            _ => stmt.fold_children(self),
+            _ => stmt.fold_children_with(self),
         };
 
         let stmt = match stmt {
@@ -147,99 +603,57 @@ impl Fold<Stmt> for Fixer {
             _ => stmt,
         };
 
-        validate!(stmt)
+        stmt
     }
-}
 
-impl Fold<IfStmt> for Fixer {
-    fn fold(&mut self, node: IfStmt) -> IfStmt {
-        let node: IfStmt = node.fold_children(self);
+    fn fold_var_declarator(&mut self, node: VarDeclarator) -> VarDeclarator {
+        let name = node.name.fold_children_with(self);
 
-        match *node.cons {
-            Stmt::If(..) => IfStmt {
-                cons: box Stmt::Block(BlockStmt {
-                    span: node.cons.span(),
-                    stmts: vec![*node.cons],
-                }),
-                ..node
-            },
+        let old = self.ctx;
+        self.ctx = Context::ForcedExpr { is_var_decl: true };
+        let init = node.init.fold_with(self);
+        self.ctx = old;
 
-            _ => node,
-        }
+        VarDeclarator { name, init, ..node }
     }
-}
 
-macro_rules! context_fn_args {
-    ($T:tt, $is_new:expr) => {
-        impl Fold<$T> for Fixer {
-            fn fold(&mut self, node: $T) -> $T {
-                let $T {
-                    span,
-                    callee,
-                    args,
-                    type_args,
-                } = node;
+    fn fold_module(&mut self, n: Module) -> Module {
+        debug_assert!(self.span_map.is_empty());
+        self.span_map.clear();
 
-                let old = self.ctx;
-                self.ctx = Context::ForcedExpr { is_var_decl: false };
-                let args = args.fold_with(self);
-                self.ctx = old;
-
-                let old = self.ctx;
-                self.ctx = Context::Callee { is_new: $is_new };
-                let callee = callee.fold_with(self);
-                self.ctx = old;
-
-                $T {
-                    span,
-                    callee,
-                    args,
-                    type_args,
-                }
+        let n = n.fold_children_with(self);
+        if let Some(c) = self.comments {
+            for (to, from) in self.span_map.drain() {
+                c.move_leading(from.lo, to.lo);
+                c.move_trailing(from.hi, to.hi);
             }
         }
-    };
-}
-context_fn_args!(NewExpr, true);
-context_fn_args!(CallExpr, false);
 
-macro_rules! array {
-    ($T:tt) => {
-        impl Fold<$T> for Fixer {
-            fn fold(&mut self, e: $T) -> $T {
-                let old = self.ctx;
-                self.ctx = Context::ForcedExpr { is_var_decl: false }.into();
-                let elems = e.elems.fold_with(self);
-                self.ctx = old;
+        n
+    }
 
-                $T { elems, ..e }
+    fn fold_script(&mut self, n: Script) -> Script {
+        debug_assert!(self.span_map.is_empty());
+        self.span_map.clear();
+
+        let n = n.fold_children_with(self);
+        if let Some(c) = self.comments {
+            for (to, from) in self.span_map.drain() {
+                c.move_leading(from.lo, to.lo);
+                c.move_trailing(from.hi, to.hi);
             }
         }
-    };
-}
-array!(ArrayLit);
-// array!(ArrayPat);
 
-impl Fold<KeyValueProp> for Fixer {
-    fn fold(&mut self, prop: KeyValueProp) -> KeyValueProp {
-        let prop = prop.fold_children(self);
-
-        match *prop.value {
-            Expr::Seq(..) => KeyValueProp {
-                value: box self.wrap(*prop.value),
-                ..prop
-            },
-            _ => prop,
-        }
+        n
     }
 }
 
-impl Fixer {
+impl Fixer<'_> {
     fn wrap<T>(&mut self, e: T) -> Expr
     where
         T: Into<Expr>,
     {
-        let expr = box e.into();
+        let expr = Box::new(e.into());
         let span = expr.span();
 
         let span = if let Some(span) = self.span_map.remove(&span) {
@@ -267,7 +681,7 @@ impl Fixer {
                 self.span_map.insert(e.span(), paren_span);
                 e
             }
-            _ => validate!(e),
+            _ => e,
         }
     }
 
@@ -279,10 +693,10 @@ impl Fixer {
             // ({ a } = foo)
             Expr::Assign(AssignExpr {
                 span,
-                left: PatOrExpr::Pat(left @ box Pat::Object(..)),
+                left: PatOrExpr::Pat(left),
                 op,
                 right,
-            }) => self.wrap(AssignExpr {
+            }) if left.is_object() => self.wrap(AssignExpr {
                 span,
                 left: PatOrExpr::Pat(left),
                 op,
@@ -317,445 +731,6 @@ impl Fixer {
     }
 }
 
-impl Fold<Expr> for Fixer {
-    fn fold(&mut self, expr: Expr) -> Expr {
-        let expr = validate!(expr);
-        let expr = expr.fold_children(self);
-        let expr = validate!(expr);
-        let expr = self.unwrap_expr(expr);
-
-        match expr {
-            Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: obj @ ExprOrSuper::Expr(box Expr::Object(..)),
-                prop,
-            }) if match self.ctx {
-                Context::ForcedExpr { is_var_decl: true } => true,
-                _ => false,
-            } =>
-            {
-                MemberExpr {
-                    span,
-                    computed,
-                    obj,
-                    prop,
-                }
-                .into()
-            }
-
-            Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Fn(_)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Assign(_)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Seq(_)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Update(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Unary(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Bin(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Object(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Cond(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::New(NewExpr { args: None, .. })),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Arrow(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Class(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Yield(..)),
-                prop,
-            })
-            | Expr::Member(MemberExpr {
-                span,
-                computed,
-                obj: ExprOrSuper::Expr(obj @ box Expr::Await(..)),
-                prop,
-            }) => validate!(MemberExpr {
-                span,
-                computed,
-                obj: self.wrap(*obj).as_obj(),
-                prop,
-            })
-            .into(),
-
-            // Flatten seq expr
-            Expr::Seq(SeqExpr { span, exprs }) => {
-                let len = exprs
-                    .iter()
-                    .map(|expr| match **expr {
-                        Expr::Seq(SeqExpr { ref exprs, .. }) => exprs.len(),
-                        _ => 1,
-                    })
-                    .sum();
-
-                let exprs_len = exprs.len();
-                let expr = if len == exprs_len {
-                    let mut exprs = exprs
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, e)| {
-                            let is_last = i + 1 == exprs_len;
-                            if is_last {
-                                Some(e)
-                            } else {
-                                ignore_return_value(e)
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    if exprs.len() == 1 {
-                        return *exprs.pop().unwrap();
-                    }
-                    validate!(Expr::Seq(SeqExpr { span, exprs }))
-                } else {
-                    let mut buf = Vec::with_capacity(len);
-                    for (i, expr) in exprs.into_iter().enumerate() {
-                        let is_last = i + 1 == exprs_len;
-
-                        match *expr {
-                            Expr::Seq(SeqExpr { exprs, .. }) => {
-                                if !is_last {
-                                    buf.extend(exprs.into_iter().filter_map(ignore_return_value));
-                                } else {
-                                    let exprs_len = exprs.len();
-                                    for (i, expr) in exprs.into_iter().enumerate() {
-                                        let is_last = i + 1 == exprs_len;
-                                        if is_last {
-                                            buf.push(expr);
-                                        } else {
-                                            buf.extend(ignore_return_value(expr));
-                                        }
-                                    }
-                                }
-                            }
-                            _ => buf.push(expr),
-                        }
-                    }
-
-                    if buf.len() == 1 {
-                        return *buf.pop().unwrap();
-                    }
-                    buf.shrink_to_fit();
-                    validate!(Expr::Seq(SeqExpr { span, exprs: buf }))
-                };
-
-                match self.ctx {
-                    Context::ForcedExpr { .. } => validate!(Expr::Paren(ParenExpr {
-                        span,
-                        expr: box expr,
-                    })),
-                    _ => validate!(expr),
-                }
-            }
-
-            Expr::Bin(mut expr) => {
-                expr.right = match *expr.right {
-                    e @ Expr::Assign(..)
-                    | e @ Expr::Seq(..)
-                    | e @ Expr::Yield(..)
-                    | e @ Expr::Cond(..)
-                    | e @ Expr::Arrow(..) => box self.wrap(e),
-                    Expr::Bin(BinExpr { op: op_of_rhs, .. }) => {
-                        if op_of_rhs.precedence() <= expr.op.precedence() {
-                            box self.wrap(*expr.right)
-                        } else {
-                            validate!(expr.right)
-                        }
-                    }
-                    _ => validate!(expr.right),
-                };
-
-                match *expr.left {
-                    // While simplifying, (1 + x) * Nan becomes `1 + x * Nan`.
-                    // But it should be `(1 + x) * Nan`
-                    Expr::Bin(BinExpr { op: op_of_lhs, .. }) => {
-                        if op_of_lhs.precedence() < expr.op.precedence() {
-                            Expr::Bin(validate!(BinExpr {
-                                left: box self.wrap(*expr.left),
-                                ..expr
-                            }))
-                        } else {
-                            Expr::Bin(validate!(expr))
-                        }
-                    }
-
-                    e @ Expr::Seq(..)
-                    | e @ Expr::Update(..)
-                    | e
-                    @
-                    Expr::Unary(UnaryExpr {
-                        op: op!("delete"), ..
-                    })
-                    | e
-                    @
-                    Expr::Unary(UnaryExpr {
-                        op: op!("void"), ..
-                    })
-                    | e @ Expr::Yield(..)
-                    | e @ Expr::Cond(..)
-                    | e @ Expr::Assign(..)
-                    | e @ Expr::Arrow(..) => validate!(Expr::Bin(BinExpr {
-                        left: box self.wrap(e),
-                        ..expr
-                    })),
-                    e @ Expr::Object(..)
-                        if expr.op == op!("instanceof")
-                            || expr.op == op!("==")
-                            || expr.op == op!("===")
-                            || expr.op == op!("!=")
-                            || expr.op == op!("!==") =>
-                    {
-                        validate!(Expr::Bin(BinExpr {
-                            left: box e.wrap_with_paren(),
-                            ..expr
-                        }))
-                    }
-                    _ => validate!(Expr::Bin(expr)),
-                }
-            }
-
-            Expr::Cond(expr) => {
-                let test = match *expr.test {
-                    e @ Expr::Seq(..)
-                    | e @ Expr::Assign(..)
-                    | e @ Expr::Cond(..)
-                    | e @ Expr::Arrow(..) => box self.wrap(e),
-
-                    e @ Expr::Object(..) | e @ Expr::Fn(..) | e @ Expr::Class(..) => {
-                        if self.ctx == Context::Default {
-                            box self.wrap(e)
-                        } else {
-                            box e
-                        }
-                    }
-                    _ => expr.test,
-                };
-
-                let cons = match *expr.cons {
-                    e @ Expr::Seq(..) => box self.wrap(e),
-                    _ => expr.cons,
-                };
-
-                let alt = match *expr.alt {
-                    e @ Expr::Seq(..) => box self.wrap(e),
-                    _ => expr.alt,
-                };
-                let expr = validate!(Expr::Cond(CondExpr {
-                    test,
-                    cons,
-                    alt,
-                    ..expr
-                }));
-                match self.ctx {
-                    Context::Callee { is_new: true } => self.wrap(expr),
-                    _ => expr,
-                }
-            }
-
-            Expr::Unary(expr) => {
-                let arg = match *expr.arg {
-                    e @ Expr::Assign(..)
-                    | e @ Expr::Bin(..)
-                    | e @ Expr::Seq(..)
-                    | e @ Expr::Cond(..)
-                    | e @ Expr::Arrow(..)
-                    | e @ Expr::Yield(..) => box self.wrap(e),
-                    _ => expr.arg,
-                };
-
-                validate!(Expr::Unary(UnaryExpr { arg, ..expr }))
-            }
-
-            Expr::Assign(expr) => {
-                let right = match *expr.right {
-                    // `foo = (bar = baz)` => foo = bar = baz
-                    Expr::Assign(AssignExpr {
-                        left: PatOrExpr::Pat(box Pat::Ident(..)),
-                        ..
-                    })
-                    | Expr::Assign(AssignExpr {
-                        left: PatOrExpr::Expr(box Expr::Ident(..)),
-                        ..
-                    }) => expr.right,
-
-                    // Handle `foo = bar = init()
-                    Expr::Seq(right) => box self.wrap(right),
-                    _ => expr.right,
-                };
-
-                validate!(Expr::Assign(AssignExpr { right, ..expr }))
-            }
-
-            Expr::Call(CallExpr {
-                span,
-                callee: ExprOrSuper::Expr(callee @ box Expr::Arrow(_)),
-                args,
-                type_args,
-            }) => validate!(Expr::Call(CallExpr {
-                span,
-                callee: self.wrap(*callee).as_callee(),
-                args,
-                type_args,
-            })),
-
-            // Function expression cannot start with `function`
-            Expr::Call(CallExpr {
-                span,
-                callee: ExprOrSuper::Expr(callee @ box Expr::Fn(_)),
-                args,
-                type_args,
-            }) => match self.ctx {
-                Context::ForcedExpr { .. } => validate!(Expr::Call(CallExpr {
-                    span,
-                    callee: callee.as_callee(),
-                    args,
-                    type_args,
-                })),
-
-                Context::Callee { is_new: true } => self.wrap(CallExpr {
-                    span,
-                    callee: callee.as_callee(),
-                    args,
-                    type_args,
-                }),
-
-                _ => validate!(Expr::Call(CallExpr {
-                    span,
-                    callee: self.wrap(*callee).as_callee(),
-                    args,
-                    type_args,
-                })),
-            },
-            Expr::Call(CallExpr {
-                span,
-                callee: ExprOrSuper::Expr(callee @ box Expr::Assign(_)),
-                args,
-                type_args,
-            }) => validate!(Expr::Call(CallExpr {
-                span,
-                callee: self.wrap(*callee).as_callee(),
-                args,
-                type_args,
-            })),
-            _ => expr,
-        }
-    }
-}
-
-impl Fold<ExprOrSpread> for Fixer {
-    fn fold(&mut self, e: ExprOrSpread) -> ExprOrSpread {
-        let e = e.fold_children(self);
-
-        if e.spread.is_none() {
-            match *e.expr {
-                Expr::Yield(..) => {
-                    return ExprOrSpread {
-                        spread: None,
-                        expr: box self.wrap(*e.expr),
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        e
-    }
-}
-
-impl Fold<ExportDefaultExpr> for Fixer {
-    fn fold(&mut self, node: ExportDefaultExpr) -> ExportDefaultExpr {
-        let old = self.ctx;
-        self.ctx = Context::Default;
-        let mut node = node.fold_children(self);
-        node.expr = match *node.expr {
-            Expr::Arrow(..) | Expr::Seq(..) => box self.wrap(*node.expr),
-            _ => node.expr,
-        };
-        self.ctx = old;
-        node
-    }
-}
-
-impl Fold<ArrowExpr> for Fixer {
-    fn fold(&mut self, node: ArrowExpr) -> ArrowExpr {
-        let old = self.ctx;
-        self.ctx = Context::Default;
-        let mut node = node.fold_children(self);
-        node.body = match node.body {
-            BlockStmtOrExpr::Expr(e @ box Expr::Seq(..)) => {
-                BlockStmtOrExpr::Expr(box self.wrap(*e))
-            }
-            _ => node.body,
-        };
-        self.ctx = old;
-        node
-    }
-}
-
-impl Fold<Class> for Fixer {
-    fn fold(&mut self, node: Class) -> Class {
-        let old = self.ctx;
-        self.ctx = Context::Default;
-        let mut node = node.fold_children(self);
-        node.super_class = match node.super_class {
-            Some(e @ box Expr::Seq(..)) => Some(box self.wrap(*e)),
-            _ => node.super_class,
-        };
-        self.ctx = old;
-        node
-    }
-}
-
 fn ignore_return_value(expr: Box<Expr>) -> Option<Box<Expr>> {
     match *expr {
         Expr::Ident(..) | Expr::Fn(..) | Expr::Lit(..) => None,
@@ -770,12 +745,12 @@ fn ignore_return_value(expr: Box<Expr>) -> Option<Box<Expr>> {
 
 #[cfg(test)]
 mod tests {
-    struct Noop;
+    use crate::pass::noop;
 
     macro_rules! test_fixer {
         ($name:ident, $from:literal, $to:literal) => {
             // We use noop because fixer is invoked by tests::apply_transform.
-            test!(Default::default(), |_| Noop, $name, $from, $to);
+            test!(Default::default(), |_| noop(), $name, $from, $to);
         };
     }
 
@@ -1078,4 +1053,6 @@ var store = global[SHARED] || (global[SHARED] = {});
     test_fixer!(void_and_bin, "(void 0) * 2", "(void 0) * 2");
 
     test_fixer!(new_cond, "new (a ? B : C)()", "new (a ? B : C)()");
+
+    identical!(issue_931, "new (eval('Date'))();");
 }

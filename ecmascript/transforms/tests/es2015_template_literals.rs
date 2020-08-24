@@ -1,10 +1,7 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 use swc_ecma_parser::Syntax;
-use swc_ecma_transforms::{compat::es2015::TemplateLiteral, pass::Pass};
+use swc_ecma_transforms::compat::es2015::template_literal;
+use swc_ecma_visit::Fold;
 
 #[macro_use]
 mod common;
@@ -13,8 +10,8 @@ fn syntax() -> Syntax {
     Default::default()
 }
 
-fn tr(_: ()) -> impl Pass {
-    TemplateLiteral::default()
+fn tr(_: ()) -> impl Fold {
+    template_literal()
 }
 
 test_exec!(
@@ -773,4 +770,39 @@ var foo = tag(_templateObject());
 var bar = tag(_templateObject1(), 1);
 
 "#
+);
+
+test!(
+    syntax(),
+    |_| tr(Default::default()),
+    issue_598_1,
+    "
+  export function foo() {
+    console.log(i18n`Hello World`);
+    console.log(i18n`Nobody will ever see this.`);
+  }
+",
+    "function _templateObject() {
+      const data = _taggedTemplateLiteral([
+          \"Hello World\"
+      ]);
+      _templateObject = function() {
+          return data;
+      };
+      return data;
+  }
+  function _templateObject1() {
+      const data = _taggedTemplateLiteral([
+          \"Nobody will ever see this.\"
+      ]);
+      _templateObject1 = function() {
+          return data;
+      };
+      return data;
+  }
+  export function foo() {
+      console.log(i18n(_templateObject()));
+      console.log(i18n(_templateObject1()));
+  }
+  "
 );

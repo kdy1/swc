@@ -1,18 +1,13 @@
-#![feature(box_patterns)]
-#![feature(box_syntax)]
-#![feature(try_trait)]
-#![feature(specialization)]
-#![feature(core_intrinsics)]
-#![feature(nll)]
-#![feature(trace_macros)]
 #![cfg_attr(test, feature(test))]
 #![recursion_limit = "1024"]
+#![deny(unused)]
 
 #[macro_use]
 extern crate swc_ecma_utils;
 
+#[cfg(feature = "const-modules")]
+pub use self::const_modules::const_modules;
 pub use self::{
-    const_modules::const_modules,
     fixer::fixer,
     hygiene::hygiene,
     resolver::{resolver, resolver_with_mark},
@@ -20,6 +15,7 @@ pub use self::{
 
 #[macro_use]
 mod macros;
+mod ext;
 #[cfg(test)]
 #[macro_use]
 mod tests;
@@ -38,7 +34,7 @@ pub mod optimization;
 pub mod pass;
 pub mod proposals;
 pub mod react;
-mod resolver;
+pub mod resolver;
 pub mod scope;
 pub mod typescript;
 pub mod util {

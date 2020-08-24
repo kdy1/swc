@@ -1,13 +1,11 @@
 use once_cell::sync::Lazy;
 use scoped_tls::scoped_thread_local;
 use std::sync::atomic::{AtomicBool, Ordering};
-use swc_common::{FileName, Fold, FoldWith, Mark, Span, DUMMY_SP};
+use swc_common::{FileName, FilePathMapping, Mark, SourceMap, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_parser::{lexer::Lexer, Parser, SourceFileInput};
-use swc_ecma_utils::{
-    options::{CM, SESSION},
-    prepend_stmts, quote_ident, quote_str, DropSpan,
-};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput};
+use swc_ecma_utils::{prepend_stmts, quote_ident, quote_str, DropSpan};
+use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 #[macro_export]
 macro_rules! enable_helper {
@@ -22,21 +20,25 @@ macro_rules! enable_helper {
 macro_rules! add_to {
     ($buf:expr, $name:ident, $b:expr, $mark:expr) => {{
         static STMTS: Lazy<Vec<Stmt>> = Lazy::new(|| {
+            let cm = SourceMap::new(FilePathMapping::empty());
             let code = include_str!(concat!("helpers/_", stringify!($name), ".js"));
-            let fm = CM.new_source_file(FileName::Custom(stringify!($name).into()), code.into());
+            let fm = cm.new_source_file(FileName::Custom(stringify!($name).into()), code.into());
             let lexer = Lexer::new(
-                *SESSION,
                 Default::default(),
                 Default::default(),
-                SourceFileInput::from(&*fm),
+                StringInput::from(&*fm),
                 None,
             );
-            let stmts = Parser::new_from(*SESSION, lexer)
+            let stmts = Parser::new_from(lexer)
                 .parse_script()
-                .map(|script| script.body.fold_with(&mut DropSpan))
-                .map_err(|mut e| {
-                    e.emit();
-                    ()
+                .map(|mut script| {
+                    script.body.visit_mut_with(&mut DropSpan {
+                        preserve_ctxt: false,
+                    });
+                    script.body
+                })
+                .map_err(|e| {
+                    unreachable!("Error occurred while parsing error: {:?}", e);
                 })
                 .unwrap();
             stmts
@@ -48,7 +50,10 @@ macro_rules! add_to {
                 STMTS
                     .iter()
                     .cloned()
-                    .map(|stmt| stmt.fold_with(&mut Marker($mark)))
+                    .map(|mut stmt| {
+                        stmt.visit_mut_with(&mut Marker($mark));
+                        stmt
+                    })
                     .map(ModuleItem::Stmt),
             )
         }
@@ -222,10 +227,11 @@ define_helpers!(Helpers {
     class_private_field_destructure: (),
 });
 
-#[derive(Clone)]
-pub struct InjectHelpers;
+pub fn inject_helpers() -> impl Fold {
+    as_folder(InjectHelpers)
+}
 
-noop_fold_type!(InjectHelpers);
+struct InjectHelpers;
 
 impl InjectHelpers {
     fn mk_helpers(&self) -> Vec<ModuleItem> {
@@ -250,29 +256,31 @@ impl InjectHelpers {
     }
 }
 
-impl Fold<Module> for InjectHelpers {
-    fn fold(&mut self, module: Module) -> Module {
-        let mut module = validate!(module);
+impl VisitMut for InjectHelpers {
+    noop_visit_mut_type!();
+
+    fn visit_mut_module(&mut self, module: &mut Module) {
         let helpers = self.mk_helpers();
 
         prepend_stmts(&mut module.body, helpers.into_iter());
-        module
     }
 }
 
 struct Marker(Mark);
 
-noop_fold_type!(Marker);
+impl VisitMut for Marker {
+    noop_visit_mut_type!();
 
-impl Fold<Span> for Marker {
-    fn fold(&mut self, sp: Span) -> Span {
-        sp.apply_mark(self.0)
+    fn visit_mut_ident(&mut self, i: &mut Ident) {
+        i.span = i.span.apply_mark(self.0);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pass::noop;
+    use swc_ecma_visit::{as_folder, FoldWith};
 
     #[test]
     fn external_helper() {
@@ -281,7 +289,9 @@ swcHelpers._throw()";
         crate::tests::Tester::run(|tester| {
             HELPERS.set(&Helpers::new(true), || {
                 let expected = tester.apply_transform(
-                    ::testing::DropSpan,
+                    as_folder(DropSpan {
+                        preserve_ctxt: false,
+                    }),
                     "output.js",
                     Default::default(),
                     "import * as swcHelpers1 from '@swc/helpers';
@@ -292,11 +302,11 @@ swcHelpers._throw();",
 
                 eprintln!("----- Actual -----");
 
-                let tr = InjectHelpers;
+                let tr = as_folder(InjectHelpers);
                 let actual = tester
                     .apply_transform(tr, "input.js", Default::default(), input)?
                     .fold_with(&mut crate::hygiene::hygiene())
-                    .fold_with(&mut crate::fixer::fixer());
+                    .fold_with(&mut crate::fixer::fixer(None));
 
                 if actual == expected {
                     return Ok(());
@@ -325,7 +335,7 @@ swcHelpers._throw();",
             Default::default(),
             |_| {
                 enable_helper!(throw);
-                InjectHelpers
+                as_folder(InjectHelpers)
             },
             "'use strict'",
             "'use strict'
@@ -343,7 +353,7 @@ function _throw(e) {
             Default::default(),
             |_| {
                 enable_helper!(throw);
-                InjectHelpers
+                as_folder(InjectHelpers)
             },
             "let _throw = null",
             "function _throw(e) {
@@ -358,7 +368,7 @@ let _throw1 = null;
     fn use_strict_abort() {
         crate::tests::test_transform(
             Default::default(),
-            |_| {},
+            |_| noop(),
             "'use strict'
 
 let x = 4;",

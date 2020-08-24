@@ -1,27 +1,28 @@
 use crate::util::UsageFinder;
-use swc_common::{Fold, FoldWith, Spanned, DUMMY_SP};
+use swc_common::{Spanned, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
+
+pub fn block_scoped_functions() -> impl Fold {
+    BlockScopedFns
+}
 
 #[derive(Clone, Copy)]
-pub struct BlockScopedFns;
+struct BlockScopedFns;
 
-noop_fold_type!(BlockScopedFns);
+impl Fold for BlockScopedFns {
+    noop_fold_type!();
 
-impl Fold<Vec<Stmt>> for BlockScopedFns {
-    fn fold(&mut self, items: Vec<Stmt>) -> Vec<Stmt> {
+    fn fold_stmts(&mut self, items: Vec<Stmt>) -> Vec<Stmt> {
         let mut stmts = Vec::with_capacity(items.len());
         let mut extra_stmts = Vec::with_capacity(items.len());
 
         for stmt in items {
-            match stmt {
-                Stmt::Expr(ExprStmt {
-                    expr: box Expr::Lit(Lit::Str(..)),
-                    ..
-                }) => {
+            if let Stmt::Expr(ExprStmt { ref expr, .. }) = stmt {
+                if let Expr::Lit(Lit::Str(..)) = &**expr {
                     stmts.push(stmt);
                     continue;
                 }
-                _ => {}
             }
 
             // This is to preserve function Class()
@@ -40,16 +41,16 @@ impl Fold<Vec<Stmt>> for BlockScopedFns {
                             decls: vec![VarDeclarator {
                                 span: DUMMY_SP,
                                 name: Pat::Ident(decl.ident.clone()),
-                                init: Some(box Expr::Fn(FnExpr {
+                                init: Some(Box::new(Expr::Fn(FnExpr {
                                     ident: Some(decl.ident),
                                     function: decl.function,
-                                })),
+                                }))),
                                 definite: false,
                             }],
                             declare: false,
                         })))
                     }
-                    _ => extra_stmts.push(validate!(stmt.fold_children(self))),
+                    _ => extra_stmts.push(validate!(stmt.fold_children_with(self))),
                 }
             }
         }

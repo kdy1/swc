@@ -1,5 +1,5 @@
-use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
 
 /// babel: `@babel/plugin-transform-reserved-words`
 ///
@@ -18,33 +18,25 @@ use swc_ecma_ast::*;
 /// var _abstract = 1;
 /// var x = _abstract + 1;
 /// ```
-#[derive(Default, Clone, Copy)]
-pub struct ReservedWord {
+pub fn reserved_words(preserve_import: bool) -> impl Fold {
+    ReservedWord { preserve_import }
+}
+struct ReservedWord {
     pub preserve_import: bool,
 }
 
-noop_fold_type!(ReservedWord);
+impl Fold for ReservedWord {
+    noop_fold_type!();
 
-impl Fold<Ident> for ReservedWord {
-    fn fold(&mut self, i: Ident) -> Ident {
+    fn fold_export_specifier(&mut self, n: ExportSpecifier) -> ExportSpecifier {
+        n
+    }
+
+    fn fold_ident(&mut self, i: Ident) -> Ident {
         fold_ident(self.preserve_import, i)
     }
-}
 
-macro_rules! noop {
-    ($T:tt) => {
-        impl Fold<$T> for ReservedWord {
-            fn fold(&mut self, node: $T) -> $T {
-                node
-            }
-        }
-    };
-}
-noop!(PropName);
-noop!(ExportSpecifier);
-
-impl Fold<ImportNamedSpecifier> for ReservedWord {
-    fn fold(&mut self, s: ImportNamedSpecifier) -> ImportNamedSpecifier {
+    fn fold_import_named_specifier(&mut self, s: ImportNamedSpecifier) -> ImportNamedSpecifier {
         if s.imported.is_some() {
             ImportNamedSpecifier {
                 local: s.local.fold_with(self),
@@ -57,10 +49,8 @@ impl Fold<ImportNamedSpecifier> for ReservedWord {
             }
         }
     }
-}
 
-impl Fold<MemberExpr> for ReservedWord {
-    fn fold(&mut self, e: MemberExpr) -> MemberExpr {
+    fn fold_member_expr(&mut self, e: MemberExpr) -> MemberExpr {
         if e.computed {
             MemberExpr {
                 obj: e.obj.fold_with(self),
@@ -73,6 +63,10 @@ impl Fold<MemberExpr> for ReservedWord {
                 ..e
             }
         }
+    }
+
+    fn fold_prop_name(&mut self, n: PropName) -> PropName {
+        n
     }
 }
 

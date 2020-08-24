@@ -1,9 +1,9 @@
 use super::*;
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
+impl<'a, I: Tokens> Parser<I> {
     #[allow(clippy::cognitive_complexity)]
-    fn parse_import(&mut self) -> PResult<'a, ModuleItem> {
+    fn parse_import(&mut self) -> PResult<ModuleItem> {
         let start = cur_pos!();
 
         if self.input.syntax().import_meta() && peeked_is!('.') {
@@ -60,8 +60,13 @@ impl<'a, I: Tokens> Parser<'a, I> {
             .map(ModuleItem::from);
         }
 
-        let type_only_span = self.input.cur_span();
-        let type_only = self.syntax().typescript() && eat!("type");
+        let type_only = self.input.syntax().typescript()
+            && is!("type")
+            && (peeked_is!('{') || !peeked_is!("from") && !peeked_is!(','));
+
+        if type_only {
+            assert_and_bump!("type");
+        }
 
         let mut specifiers = vec![];
 
@@ -101,14 +106,6 @@ impl<'a, I: Tokens> Parser<'a, I> {
             }
         }
 
-        // import type from './a';
-        if type_only && specifiers.is_empty() {
-            specifiers.push(ImportSpecifier::Default(ImportDefaultSpecifier {
-                span: span!(start),
-                local: Ident::new(js_word!("type"), type_only_span),
-            }));
-        }
-
         let src = self.parse_from_clause_and_semi()?;
 
         Ok(ModuleDecl::Import(ImportDecl {
@@ -121,7 +118,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     /// Parse `foo`, `foo2 as bar` in `import { foo, foo2 as bar }`
-    fn parse_import_specifier(&mut self) -> PResult<'a, ImportSpecifier> {
+    fn parse_import_specifier(&mut self) -> PResult<ImportSpecifier> {
         let start = cur_pos!();
         match cur!(false) {
             Ok(&Word(..)) => {
@@ -151,15 +148,15 @@ impl<'a, I: Tokens> Parser<'a, I> {
                     imported: None,
                 }))
             }
-            _ => unexpected!(),
+            _ => unexpected!("an identifier"),
         }
     }
 
-    fn parse_imported_default_binding(&mut self) -> PResult<'a, Ident> {
+    fn parse_imported_default_binding(&mut self) -> PResult<Ident> {
         self.parse_imported_binding()
     }
 
-    fn parse_imported_binding(&mut self) -> PResult<'a, Ident> {
+    fn parse_imported_binding(&mut self) -> PResult<Ident> {
         let ctx = Context {
             in_async: false,
             in_generator: false,
@@ -169,7 +166,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn parse_export(&mut self, decorators: Vec<Decorator>) -> PResult<'a, ModuleDecl> {
+    fn parse_export(&mut self, decorators: Vec<Decorator>) -> PResult<ModuleDecl> {
         let start = cur_pos!();
         assert_and_bump!("export");
         let _ = cur!(true);
@@ -239,6 +236,8 @@ impl<'a, I: Tokens> Parser<'a, I> {
         let mut export_ns = None;
         let ns_export_specifier_start = cur_pos!();
 
+        let type_only = self.input.syntax().typescript() && eat!("type");
+
         if eat!('*') {
             has_star = true;
             if is!("from") {
@@ -261,8 +260,6 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 }));
             }
         }
-
-        let type_only = self.input.syntax().typescript() && eat!("type");
 
         // Some("default") if default is exported from 'src'
         let mut export_default = None;
@@ -319,10 +316,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
             } else if self.input.syntax().export_default_from()
                 && (is!("from") || (is!(',') && peeked_is!('{')))
             {
-                export_default = Some(Ident::new(
-                    "default".into(),
-                    make_span(self.input.prev_span()),
-                ))
+                export_default = Some(Ident::new("default".into(), self.input.prev_span()))
             } else {
                 let expr = self.include_in_expr(true).parse_assignment_expr()?;
                 expect!(';');
@@ -478,7 +472,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }))
     }
 
-    fn parse_named_export_specifier(&mut self) -> PResult<'a, ExportNamedSpecifier> {
+    fn parse_named_export_specifier(&mut self) -> PResult<ExportNamedSpecifier> {
         let start = cur_pos!();
 
         let orig = self.parse_ident_name()?;
@@ -496,7 +490,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         })
     }
 
-    fn parse_from_clause_and_semi(&mut self) -> PResult<'a, Str> {
+    fn parse_from_clause_and_semi(&mut self) -> PResult<Str> {
         expect!("from");
 
         let str_start = cur_pos!();
@@ -509,7 +503,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 },
                 _ => unreachable!(),
             },
-            _ => unexpected!(),
+            _ => unexpected!("a string literal"),
         };
         expect!(';');
         Ok(src)
@@ -526,12 +520,12 @@ impl IsDirective for ModuleItem {
 }
 
 #[parser]
-impl<'a, I: Tokens> StmtLikeParser<'a, ModuleItem> for Parser<'a, I> {
+impl<'a, I: Tokens> StmtLikeParser<'a, ModuleItem> for Parser<I> {
     fn handle_import_export(
         &mut self,
         top_level: bool,
         decorators: Vec<Decorator>,
-    ) -> PResult<'a, ModuleItem> {
+    ) -> PResult<ModuleItem> {
         if !top_level {
             syntax_error!(SyntaxError::NonTopLevelImportExport);
         }
@@ -570,7 +564,7 @@ export default class Foo {
                 decorators_before_export: true,
                 ..Default::default()
             }),
-            |p| p.parse_module().map_err(|mut e| e.emit()),
+            |p| p.parse_module(),
         );
     }
 }

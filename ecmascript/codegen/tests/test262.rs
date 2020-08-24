@@ -1,5 +1,3 @@
-#![feature(box_syntax)]
-#![feature(specialization)]
 #![feature(test)]
 
 extern crate test;
@@ -11,9 +9,9 @@ use std::{
     path::Path,
     sync::{Arc, RwLock},
 };
-use swc_common::comments::Comments;
+use swc_common::comments::SingleThreadedComments;
 use swc_ecma_codegen::{self, Emitter};
-use swc_ecma_parser::{lexer::Lexer, Parser, Session, SourceFileInput, Syntax};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
@@ -87,13 +85,9 @@ fn add_test<F: FnOnce() + Send + 'static>(
             should_panic: No,
             allow_fail: false,
         },
-        testfn: DynTestFn(box f),
+        testfn: DynTestFn(Box::new(f)),
     });
 }
-
-struct MyHandlers;
-
-impl swc_ecma_codegen::Handlers for MyHandlers {}
 
 fn error_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
     let ref_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -149,41 +143,41 @@ fn error_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                     src.count_lines()
                 );
 
-                let comments = Comments::default();
-                let handlers = box MyHandlers;
+                let comments = SingleThreadedComments::default();
                 let lexer = Lexer::new(
-                    Session { handler: &handler },
                     Syntax::default(),
                     Default::default(),
                     (&*src).into(),
                     Some(&comments),
                 );
-                let mut parser: Parser<'_, Lexer<'_, SourceFileInput<'_>>> =
-                    Parser::new_from(Session { handler: &handler }, lexer);
+                let mut parser: Parser<Lexer<StringInput>> = Parser::new_from(lexer);
 
                 {
                     let mut emitter = Emitter {
                         cfg: Default::default(),
                         cm: cm.clone(),
-                        wr: box swc_ecma_codegen::text_writer::JsWriter::new(
+                        wr: Box::new(swc_ecma_codegen::text_writer::JsWriter::new(
                             cm, "\n", &mut wr, None,
-                        ),
+                        )),
                         comments: Some(&comments),
-                        handlers,
                     };
 
                     // Parse source
                     if module {
                         emitter
-                            .emit_module(&parser.parse_module().map_err(|mut e| {
-                                e.emit();
-                            })?)
+                            .emit_module(
+                                &parser
+                                    .parse_module()
+                                    .map_err(|e| e.into_diagnostic(handler).emit())?,
+                            )
                             .unwrap();
                     } else {
                         emitter
-                            .emit_script(&parser.parse_script().map_err(|mut e| {
-                                e.emit();
-                            })?)
+                            .emit_script(
+                                &parser
+                                    .parse_script()
+                                    .map_err(|e| e.into_diagnostic(handler).emit())?,
+                            )
                             .unwrap();
                     }
                 }

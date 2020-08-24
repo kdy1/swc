@@ -1,5 +1,4 @@
 #![feature(test)]
-#![feature(specialization)]
 
 extern crate test;
 
@@ -7,8 +6,8 @@ extern crate test;
 static GLOBAL: System = System;
 
 use std::alloc::System;
-use swc_common::{chain, FileName, FoldWith, Mark};
-use swc_ecma_parser::{lexer::Lexer, Parser, Session, SourceFileInput};
+use swc_common::{chain, FileName, Mark};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput};
 use swc_ecma_transforms::{compat, helpers};
 use test::Bencher;
 
@@ -86,25 +85,19 @@ module.exports = {
 /// Benchmark a folder
 macro_rules! tr {
     ($b:expr, $tr:expr) => {
+        use swc_ecma_visit::FoldWith;
         $b.bytes = SOURCE.len() as _;
 
-        let _ = ::testing::run_test(false, |cm, handler| {
+        let _ = ::testing::run_test(false, |cm, _| {
             let fm = cm.new_source_file(FileName::Anon, SOURCE.into());
             let lexer = Lexer::new(
-                Session { handler: &handler },
                 Default::default(),
                 Default::default(),
-                SourceFileInput::from(&*fm),
+                StringInput::from(&*fm),
                 None,
             );
-            let mut parser = Parser::new_from(Session { handler: &handler }, lexer);
-            let module = parser
-                .parse_module()
-                .map_err(|mut e| {
-                    e.emit();
-                    ()
-                })
-                .unwrap();
+            let mut parser = Parser::new_from(lexer);
+            let module = parser.parse_module().map_err(|_| ()).unwrap();
             helpers::HELPERS.set(&Default::default(), || {
                 let mut tr = $tr();
 
@@ -173,7 +166,7 @@ fn es2015_arrow(b: &mut Bencher) {
 
 #[bench]
 fn es2015_block_scoped_fn(b: &mut Bencher) {
-    tr!(b, || compat::es2015::BlockScopedFns);
+    tr!(b, || compat::es2015::block_scoped_functions());
 }
 
 #[bench]
@@ -183,7 +176,7 @@ fn es2015_block_scoping(b: &mut Bencher) {
 
 #[bench]
 fn es2015_classes(b: &mut Bencher) {
-    tr!(b, || compat::es2015::Classes::default());
+    tr!(b, || compat::es2015::classes());
 }
 
 #[bench]
@@ -218,12 +211,12 @@ fn es2015_for_of(b: &mut Bencher) {
 
 #[bench]
 fn es2015_instanceof(b: &mut Bencher) {
-    tr!(b, || compat::es2015::InstanceOf);
+    tr!(b, || compat::es2015::instance_of());
 }
 
 #[bench]
 fn es2015_shorthand_property(b: &mut Bencher) {
-    tr!(b, || compat::es2015::Shorthand);
+    tr!(b, || compat::es2015::shorthand());
 }
 
 #[bench]
@@ -237,12 +230,12 @@ fn es2015_spread(b: &mut Bencher) {
 
 #[bench]
 fn es2015_sticky_regex(b: &mut Bencher) {
-    tr!(b, || compat::es2015::StickyRegex);
+    tr!(b, || compat::es2015::sticky_regex());
 }
 
 #[bench]
 fn es2015_typeof_symbol(b: &mut Bencher) {
-    tr!(b, || compat::es2015::TypeOfSymbol);
+    tr!(b, || compat::es2015::typeof_symbol());
 }
 
 #[bench]

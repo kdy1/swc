@@ -1,8 +1,4 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 extern crate test;
 
 use std::{
@@ -12,11 +8,12 @@ use std::{
     path::Path,
     sync::{Arc, RwLock},
 };
-use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
 use swc_ecma_codegen::{self, Emitter};
-use swc_ecma_parser::{lexer::Lexer, Parser, Session, SourceFileInput, Syntax};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_transforms::fixer;
+use swc_ecma_utils::DropSpan;
+use swc_ecma_visit::{Fold, FoldWith, VisitMutWith};
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
@@ -108,13 +105,9 @@ fn add_test<F: FnOnce() + Send + 'static>(
             should_panic: No,
             allow_fail: false,
         },
-        testfn: DynTestFn(box f),
+        testfn: DynTestFn(Box::new(f)),
     });
 }
-
-struct MyHandlers;
-
-impl swc_ecma_codegen::Handlers for MyHandlers {}
 
 fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -159,8 +152,6 @@ fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                     "\n\n========== Running fixer test {}\nSource:\n{}\n",
                     file_name, input
                 );
-                let mut wr = Buf(Arc::new(RwLock::new(vec![])));
-                let mut wr2 = Buf(Arc::new(RwLock::new(vec![])));
 
                 ::testing::run_test(false, |cm, handler| {
                     let src = cm.load_file(&entry.path()).expect("failed to load file");
@@ -168,60 +159,51 @@ fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                         .load_file(&normal.join(file_name))
                         .expect("failed to load reference file");
 
-                    {
-                        let handlers = box MyHandlers;
-                        let handlers2 = box MyHandlers;
-                        let mut parser: Parser<'_, Lexer<'_, SourceFileInput<'_>>> = Parser::new(
-                            Session { handler: &handler },
-                            Syntax::default(),
-                            (&*src).into(),
-                            None,
-                        );
+                    let mut wr = Buf(Arc::new(RwLock::new(vec![])));
+                    let mut wr2 = Buf(Arc::new(RwLock::new(vec![])));
 
+                    let mut parser: Parser<Lexer<StringInput>> =
+                        Parser::new(Syntax::default(), (&*src).into(), None);
+
+                    {
                         let mut emitter = Emitter {
                             cfg: swc_ecma_codegen::Config { minify: false },
                             cm: cm.clone(),
-                            wr: box swc_ecma_codegen::text_writer::JsWriter::new(
+                            wr: Box::new(swc_ecma_codegen::text_writer::JsWriter::new(
                                 cm.clone(),
                                 "\n",
                                 &mut wr,
                                 None,
-                            ),
+                            )),
                             comments: None,
-                            handlers,
                         };
                         let mut expected_emitter = Emitter {
                             cfg: swc_ecma_codegen::Config { minify: false },
                             cm: cm.clone(),
-                            wr: box swc_ecma_codegen::text_writer::JsWriter::new(
+                            wr: Box::new(swc_ecma_codegen::text_writer::JsWriter::new(
                                 cm, "\n", &mut wr2, None,
-                            ),
+                            )),
                             comments: None,
-                            handlers: handlers2,
                         };
 
                         // Parse source
 
-                        let mut e_parser: Parser<'_, Lexer<'_, SourceFileInput<'_>>> = Parser::new(
-                            Session { handler: &handler },
-                            Syntax::default(),
-                            (&*expected).into(),
-                            None,
-                        );
+                        let mut e_parser: Parser<Lexer<StringInput>> =
+                            Parser::new(Syntax::default(), (&*expected).into(), None);
 
                         if module {
                             let module = parser
                                 .parse_module()
                                 .map(normalize)
-                                .map(|p| p.fold_with(&mut fixer()))
-                                .map_err(|mut e| {
-                                    e.emit();
+                                .map(|p| p.fold_with(&mut fixer(None)))
+                                .map_err(|e| {
+                                    e.into_diagnostic(handler).emit();
                                 })?;
                             let module2 = e_parser
                                 .parse_module()
                                 .map(normalize)
-                                .map_err(|mut e| {
-                                    e.emit();
+                                .map_err(|e| {
+                                    e.into_diagnostic(handler).emit();
                                 })
                                 .expect("failed to parse reference file");
                             if module == module2 {
@@ -233,16 +215,16 @@ fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                             let script = parser
                                 .parse_script()
                                 .map(normalize)
-                                .map(|p| p.fold_with(&mut fixer()))
-                                .map_err(|mut e| {
-                                    e.emit();
+                                .map(|p| p.fold_with(&mut fixer(None)))
+                                .map_err(|e| {
+                                    e.into_diagnostic(&handler).emit();
                                 })?;
                             let script2 = e_parser
                                 .parse_script()
                                 .map(normalize)
-                                .map(|p| p.fold_with(&mut fixer()))
-                                .map_err(|mut e| {
-                                    e.emit();
+                                .map(|p| p.fold_with(&mut fixer(None)))
+                                .map_err(|e| {
+                                    e.into_diagnostic(&handler).emit();
                                 })?;
 
                             if script == script2 {
@@ -251,6 +233,10 @@ fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                             emitter.emit_script(&script).unwrap();
                             expected_emitter.emit_script(&script2).unwrap();
                         }
+                    }
+
+                    for e in parser.take_errors() {
+                        e.into_diagnostic(handler).emit();
                     }
 
                     let output = String::from_utf8_lossy(&*wr.0.read().unwrap()).to_string();
@@ -291,23 +277,20 @@ impl Write for Buf {
 }
 
 struct Normalizer;
-impl Fold<Stmt> for Normalizer {
-    fn fold(&mut self, stmt: Stmt) -> Stmt {
-        let stmt = stmt.fold_children(self);
+impl Fold for Normalizer {
+    fn fold_new_expr(&mut self, expr: NewExpr) -> NewExpr {
+        let mut expr = expr.fold_children_with(self);
 
-        match stmt {
-            Stmt::Expr(ExprStmt {
-                span,
-                expr: box Expr::Paren(ParenExpr { expr, .. }),
-            }) => Stmt::Expr(ExprStmt { span, expr }),
-            _ => stmt,
-        }
+        expr.args = match expr.args {
+            Some(..) => expr.args,
+            None => Some(vec![]),
+        };
+
+        expr
     }
-}
 
-impl Fold<PropName> for Normalizer {
-    fn fold(&mut self, name: PropName) -> PropName {
-        let name = name.fold_children(self);
+    fn fold_prop_name(&mut self, name: PropName) -> PropName {
+        let name = name.fold_children_with(self);
 
         match name {
             PropName::Ident(i) => PropName::Str(Str {
@@ -334,25 +317,27 @@ impl Fold<PropName> for Normalizer {
             _ => name,
         }
     }
-}
 
-impl Fold<NewExpr> for Normalizer {
-    fn fold(&mut self, expr: NewExpr) -> NewExpr {
-        let mut expr = expr.fold_children(self);
+    fn fold_stmt(&mut self, stmt: Stmt) -> Stmt {
+        let stmt = stmt.fold_children_with(self);
 
-        expr.args = match expr.args {
-            Some(..) => expr.args,
-            None => Some(vec![]),
-        };
-
-        expr
+        match stmt {
+            Stmt::Expr(ExprStmt { span, expr }) => match *expr {
+                Expr::Paren(ParenExpr { expr, .. }) => Stmt::Expr(ExprStmt { span, expr }),
+                _ => Stmt::Expr(ExprStmt { span, expr }),
+            },
+            _ => stmt,
+        }
     }
 }
 
 fn normalize<T>(node: T) -> T
 where
-    T: FoldWith<Normalizer> + FoldWith<::testing::DropSpan>,
+    T: FoldWith<Normalizer> + VisitMutWith<DropSpan>,
 {
-    node.fold_with(&mut Normalizer)
-        .fold_with(&mut ::testing::DropSpan)
+    let mut node = node.fold_with(&mut Normalizer);
+    node.visit_mut_with(&mut DropSpan {
+        preserve_ctxt: false,
+    });
+    node
 }

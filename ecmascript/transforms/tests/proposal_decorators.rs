@@ -1,18 +1,24 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 use swc_common::chain;
 use swc_ecma_parser::{EsConfig, Syntax, TsConfig};
 use swc_ecma_transforms::{
-    pass::Pass,
-    proposals::{class_properties, decorators, decorators::Config},
+    compat::{es2015::classes::classes, es2020::class_properties},
+    optimization::simplify::inlining,
+    proposals::{decorators, decorators::Config},
     resolver, typescript,
+    typescript::strip,
 };
+use swc_ecma_visit::Fold;
 
 #[macro_use]
 mod common;
+
+fn ts() -> Syntax {
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    })
+}
 
 fn syntax(decorators_before_export: bool) -> Syntax {
     Syntax::Es(EsConfig {
@@ -23,13 +29,24 @@ fn syntax(decorators_before_export: bool) -> Syntax {
     })
 }
 
-fn tr() -> impl Pass {
+fn tr() -> impl Fold {
     chain!(decorators(Default::default()), class_properties(),)
 }
 
+fn ts_transform() -> impl Fold {
+    chain!(
+        strip(),
+        decorators(Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        class_properties(),
+    )
+}
+
 /// Folder for `transformation_*` tests
-fn transformation() -> impl Pass {
-    chain!(decorators(Default::default()), class_properties(),)
+fn transformation() -> impl Fold {
+    chain!(strip(), decorators(Default::default()), class_properties(),)
 }
 
 // transformation_declaration
@@ -2032,7 +2049,10 @@ let A = _decorate([], function(_initialize) {
 test_exec!(
     syntax(true),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_constructors_return_new_constructor_exec,
@@ -2059,7 +2079,10 @@ test!(
     syntax(true),
     |_| chain!(
         typescript::strip(),
-        decorators(decorators::Config { legacy: true })
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        })
     ),
     legacy_regression_10264,
     r#"
@@ -2073,8 +2096,8 @@ export default class {}
 var _class;
 function myDecorator(decoratee) {
 }
-let _class1 = myDecorator((_class = class{
-}) || _class);
+let _class1 = _class = myDecorator((_class = class {
+}) || _class) || _class;
 export { _class1 as default }
 
 
@@ -2464,18 +2487,21 @@ export { _class1 as default }
 // legacy_decl_to_expression_class_decorators
 test!(
     syntax(false),
-    |_| decorators(Config { legacy: true }),
+    |_| decorators(Config {
+        legacy: true,
+        ..Default::default()
+    }),
     legacy_decl_to_expression_class_decorators,
     r#"
 export default @dec class A {}
 @dec class B {}
 "#,
     r#"
-var _class, _class1;
-export default dec((_class = class A{
-}) || _class);
-let B = dec((_class1 = class B{
-}) || _class1);
+    var _class, _class1;
+    export default _class = dec((_class = class A {
+    }) || _class) || _class;
+    let B = _class1 = dec((_class1 = class B {
+    }) || _class1) || _class1;
 "#
 );
 
@@ -2483,7 +2509,10 @@ let B = dec((_class1 = class B{
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_methods_numeric_props_exec,
@@ -2506,7 +2535,10 @@ class Example {
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_static_properties_mutate_descriptor_exec,
@@ -2618,7 +2650,10 @@ expect(Example._).toBe("__8__");
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_static_methods_string_props_exec,
@@ -2641,7 +2676,10 @@ class Example {
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_properties_string_literal_properties_exec,
@@ -2670,11 +2708,11 @@ expect(inst.decoratedProps).toEqual([
 expect(inst).toHaveProperty("a-prop");
 expect(inst["a-prop"]).toBeUndefined();
 
-const descs = Object.getOwnPropertyDescriptors(inst);
+// const descs = Object.getOwnPropertyDescriptors(inst);
 
-expect(descs["a-prop"].enumerable).toBeTruthy();
-expect(descs["a-prop"].writable).toBeTruthy();
-expect(descs["a-prop"].configurable).toBeTruthy();
+// expect(descs["a-prop"].enumerable).toBeTruthy();
+// expect(descs["a-prop"].writable).toBeTruthy();
+// expect(descs["a-prop"].configurable).toBeTruthy();
 
 "#
 );
@@ -2683,7 +2721,10 @@ expect(descs["a-prop"].configurable).toBeTruthy();
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_methods_mutate_descriptor_exec,
@@ -2813,7 +2854,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_properties_numeric_props_exec,
@@ -2835,7 +2879,10 @@ const inst = {
 // legacy_decl_to_expression_method_decorators
 test!(
     syntax(false),
-    |_| decorators(Config { legacy: true }),
+    |_| decorators(Config {
+        legacy: true,
+        ..Default::default()
+    }),
     legacy_decl_to_expression_method_decorators,
     r#"
 export default class A {
@@ -2864,7 +2911,10 @@ export { A as default }
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_properties_return_descriptor_exec,
@@ -2978,7 +3028,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_properties_string_props_exec,
@@ -3003,7 +3056,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_properties_return_descriptor_exec,
@@ -3113,7 +3169,10 @@ expect(inst._).toBe("__8__");
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_methods_string_props_exec,
@@ -3136,7 +3195,10 @@ class Example {
 test!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_regression_8041,
@@ -3164,7 +3226,10 @@ export { _class1 as default }
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_methods_return_descriptor_exec,
@@ -3296,7 +3361,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_ordering_reverse_order_exec,
@@ -3337,7 +3405,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_methods_numeric_props_exec,
@@ -3361,7 +3432,10 @@ const inst = {
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_static_properties_return_descriptor_exec,
@@ -3478,7 +3552,10 @@ test_exec!(
     ignore,
     syntax(true),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_export_default_exec,
@@ -3505,7 +3582,10 @@ expect(calls).toEqual(["Foo"]);
 test_exec!(
     syntax(true),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_ordering_reverse_order_exec,
@@ -3549,7 +3629,10 @@ test_exec!(
     ignore,
     syntax(true),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_methods_mutate_descriptor_exec,
@@ -3675,7 +3758,10 @@ expect(inst._()).toBe("__8__");
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_static_methods_return_descriptor_exec,
@@ -3804,7 +3890,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_methods_return_descriptor_exec,
@@ -3932,7 +4021,10 @@ test_exec!(
     ignore,
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_object_methods_string_props_exec,
@@ -3957,7 +4049,10 @@ const inst = {
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_prototype_properties_child_classes_properties_exec,
@@ -3997,7 +4092,10 @@ expect(inst.prop2).toBe("__4__");
 test_exec!(
     syntax(false),
     |_| chain!(
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         class_properties(),
     ),
     legacy_class_static_methods_mutate_descriptor_exec,
@@ -4122,7 +4220,10 @@ expect(Example._()).toBe("__8__");
 // legacy_regression_8512
 test_exec!(
     syntax(false),
-    |_| decorators(Config { legacy: true }),
+    |_| decorators(Config {
+        legacy: true,
+        ..Default::default()
+    }),
     legacy_regression_8512_exec,
     r#"
 function dec(Class, key, desc) {
@@ -4139,7 +4240,10 @@ class Foo {
 
 test!(
     syntax(false),
-    |_| decorators(Config { legacy: true }),
+    |_| decorators(Config {
+        legacy: true,
+        ..Default::default()
+    }),
     issue_591_1,
     "
 export class Example {
@@ -4173,7 +4277,10 @@ export let Example = ((_class = class Example{
 
 test!(
     syntax(false),
-    |_| decorators(Config { legacy: true }),
+    |_| decorators(Config {
+        legacy: true,
+        ..Default::default()
+    }),
     issue_591_2,
     "class Example {
   @foo() bar = '1';
@@ -4202,4 +4309,823 @@ let Example = ((_class = class Example{
     }
 }), _class);
 "
+);
+
+test!(
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    }),
+    |_| chain!(
+        typescript::strip(),
+        decorators(Config {
+            legacy: true,
+            ..Default::default()
+        })
+    ),
+    issue_823_1,
+    "import {Debounce} from 'lodash-decorators';
+class Person {
+  private static debounceTime: number = 500 as const;
+
+  @Debounce(Person.debounceTime)
+  save() {
+    console.log('Hello World!');
+  }
+}
+
+const p = new Person();
+p.save();",
+    "var _class, _dec;
+import { Debounce } from 'lodash-decorators';
+let Person = ((_class = class Person {
+    static debounceTime = 500;
+    save() {
+        console.log('Hello World!');
+    }
+}) || _class, _dec = Debounce(_class.debounceTime), _applyDecoratedDescriptor(_class.prototype, \
+     'save', [
+    _dec
+], Object.getOwnPropertyDescriptor(_class.prototype, 'save'), _class.prototype), _class);
+const p = new Person();
+p.save();"
+);
+
+test!(
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    }),
+    |_| chain!(
+        typescript::strip(),
+        decorators(Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        class_properties(),
+        // classes(),
+    ),
+    issue_823_2,
+    "import {Debounce} from 'lodash-decorators';
+class Person {
+  private static debounceTime: number = 500 as const;
+
+  @Debounce(Person.debounceTime)
+  save() {
+    console.log('Hello World!');
+  }
+}
+
+const p = new Person();
+p.save();",
+    "var _class, _dec;
+import { Debounce } from 'lodash-decorators';
+let Person = ((_class = function() {
+    class Person {
+        save() {
+            console.log('Hello World!');
+        }
+    }
+    _defineProperty(Person, 'debounceTime', 500);
+    return Person;
+}()) || _class, _dec = Debounce(_class.debounceTime), _applyDecoratedDescriptor(_class.prototype, \
+     'save', [
+    _dec
+], Object.getOwnPropertyDescriptor(_class.prototype, 'save'), _class.prototype), _class);
+const p = new Person();
+p.save();
+"
+);
+
+test!(
+    Syntax::Typescript(TsConfig {
+        decorators: true,
+        ..Default::default()
+    }),
+    |_| chain!(
+        typescript::strip(),
+        decorators(Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        class_properties(),
+        classes(),
+    ),
+    issue_823_3,
+    "import {Debounce} from 'lodash-decorators';
+class Person {
+  private static debounceTime: number = 500 as const;
+
+  @Debounce(Person.debounceTime)
+  save() {
+    console.log('Hello World!');
+  }
+}
+
+const p = new Person();
+p.save();",
+    "var _class, _dec;
+import { Debounce } from 'lodash-decorators';
+let Person = ((_class = function() {
+    let Person = function() {
+        'use strict';
+        function Person() {
+            _classCallCheck(this, Person);
+        }
+        _createClass(Person, [
+            {
+                key: 'save',
+                value: function save() {
+                    console.log('Hello World!');
+                }
+            }
+        ]);
+        return Person;
+    }();
+    _defineProperty(Person, 'debounceTime', 500);
+    return Person;
+}()) || _class, _dec = Debounce(_class.debounceTime), _applyDecoratedDescriptor(_class.prototype, \
+     'save', [
+    _dec
+], Object.getOwnPropertyDescriptor(_class.prototype, 'save'), _class.prototype), _class);
+const p = new Person();
+p.save();"
+);
+
+test!(
+    ts(),
+    |_| ts_transform(),
+    issue_862_1,
+    "
+ @Entity()
+export class Product extends TimestampedEntity {
+  @PrimaryGeneratedColumn('uuid')
+  public id!: string;
+
+  @Column()
+  public price!: number;
+
+  @Column({ enum: ProductType })
+  public type!: ProductType;
+
+  @Column()
+  public productEntityId!: string;
+
+  /* ANCHOR: Relations ------------------------------------------------------ */
+  @OneToMany(() => Order, (order) => order.product)
+  public orders!: Order[];
+
+  @OneToMany(() => Discount, (discount) => discount.product)
+  public discounts!: Discount[];
+}   
+",
+    "var _class, _descriptor, _descriptor1, _descriptor2, _descriptor3, _descriptor4, \
+     _descriptor5;
+var _dec = PrimaryGeneratedColumn('uuid'), _dec1 = Column(), _dec2 = Column({
+    enum: ProductType
+}), _dec3 = Column(), _dec4 = OneToMany(()=>Order
+, (order)=>order.product
+), _dec5 = OneToMany(()=>Discount
+, (discount)=>discount.product
+), _dec6 = Entity();
+export let Product = _class = _dec6(((_class = function() {
+    class Product extends TimestampedEntity {
+        constructor(...args){
+            super(...args);
+            _initializerDefineProperty(this, 'id', _descriptor, this);
+            _initializerDefineProperty(this, 'price', _descriptor1, this);
+            _initializerDefineProperty(this, 'type', _descriptor2, this);
+            _initializerDefineProperty(this, 'productEntityId', _descriptor3, this);
+            _initializerDefineProperty(this, 'orders', _descriptor4, this);
+            _initializerDefineProperty(this, 'discounts', _descriptor5, this);
+        }
+    }
+    return Product;
+}()) || _class, _descriptor = _applyDecoratedDescriptor(_class.prototype, 'id', [
+    _dec
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0,
+}), _descriptor1 = _applyDecoratedDescriptor(_class.prototype, 'price', [
+    _dec1
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0,
+}), _descriptor2 = _applyDecoratedDescriptor(_class.prototype, 'type', [
+    _dec2
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0,
+}), _descriptor3 = _applyDecoratedDescriptor(_class.prototype, 'productEntityId', [
+    _dec3
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0,
+}), _descriptor4 = _applyDecoratedDescriptor(_class.prototype, 'orders', [
+    _dec4
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0,
+}), _descriptor5 = _applyDecoratedDescriptor(_class.prototype, 'discounts', [
+    _dec5
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0
+}), _class)) || _class;
+"
+);
+
+test!(
+    ts(),
+    |_| ts_transform(),
+    issue_862_2,
+    "@Entity()
+export class Product extends TimestampedEntity {
+  @PrimaryGeneratedColumn('uuid')
+  public id!: string;
+}
+",
+    "var _class, _descriptor;
+    var _dec = PrimaryGeneratedColumn(\"uuid\"), _dec1 = Entity();
+    export let Product = _class = _dec1(((_class = function() {
+    class Product extends TimestampedEntity {
+        constructor(...args){
+            super(...args);
+            _initializerDefineProperty(this, 'id', _descriptor, this);
+        }
+    }
+    return Product;
+}()) || _class, _descriptor = _applyDecoratedDescriptor(_class.prototype, 'id', [
+    _dec
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: void 0
+}), _class)) || _class;
+"
+);
+
+test_exec!(
+    ts(),
+    |_| ts_transform(),
+    issue_862_3,
+    "var log: number[] = [];
+function push(x: number) { log.push(x); return x; }
+
+function saveOrder(x: number) {
+    return function (el: any) {
+        log.push(x);
+        return el;
+    };
+}
+
+@saveOrder(1)
+class Product {
+    @saveOrder(0)
+    public id!: string;
+}
+
+var nums = Array.from({ length: 2 }, (_, i) => i);
+expect(log).toEqual(nums)"
+);
+
+test!(
+    ts(),
+    |_| ts_transform(),
+    issue_863_1,
+    "class ProductController {
+  @bar()
+  findById(
+    @foo()
+    id: number
+  ) {
+    // ...
+  }
+}",
+    " var _class, _dec;
+let ProductController = ((_class = function() {
+    class ProductController {
+        findById(id) {
+        }
+    }
+    return ProductController;
+}()) || _class, foo()(_class.prototype, 'findById', 0), _dec = bar(), \
+     _applyDecoratedDescriptor(_class.prototype, 'findById', [
+    _dec
+], Object.getOwnPropertyDescriptor(_class.prototype, 'findById'), _class.prototype), _class);"
+);
+
+test_exec!(
+    ts(),
+    |_| ts_transform(),
+    issue_863_2,
+    "const logs: number[] = [];
+
+function foo() {
+  return function (target: any, member: any, ix: any) {
+    logs.push(0);
+  };
+}
+function bar() {
+  return function (target: any, member: any, ix: any) {
+    logs.push(1);
+  };
+}
+
+class ProductController {
+  findById(
+    @foo()
+    @bar()
+    id: number
+  ) {
+    // ...
+  }
+}
+
+expect(logs).toEqual([0, 1])
+
+const c = new ProductController();
+c.findById(100);
+"
+);
+
+test!(
+    ts(),
+    |_| chain!(
+        strip(),
+        inlining::inlining(inlining::Config {}),
+        decorators(Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        class_properties(),
+    ),
+    issue_879_1,
+    "export default class X {
+    @networked
+    prop: string = '';
+}",
+    "var _class, _descriptor;
+let X = ((_class = function() {
+    class X {
+        constructor(){
+            _initializerDefineProperty(this, 'prop', _descriptor, this);
+        }
+    }
+    return X;
+}()) || _class, _descriptor = _applyDecoratedDescriptor(_class.prototype, 'prop', [
+    networked
+], {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    initializer: function() {
+        return '';
+    }
+}), _class);
+export { X as default };
+"
+);
+
+test!(
+    ts(),
+    |_| decorators(Config {
+        legacy: true,
+        emit_metadata: true,
+    }),
+    legacy_metadata_generics_base,
+    "@Decorate
+  class MyClass {
+    constructor(
+      private generic: Generic<A>,
+      generic2: Generic<A, B>
+    ) {}
+  
+    @Run
+    method(
+      generic: Inter<A>,
+      @Arg() generic2: InterGen<A, B>
+    ) {}
+  }",
+    r#"
+    var _class, _dec, _dec1, _dec2;
+var _dec3 = Reflect.metadata("design:paramtypes", [
+    typeof Generic === "undefined" ? Object : Generic,
+    typeof Generic === "undefined" ? Object : Generic
+]), _dec4 = Reflect.metadata("design:type", Function);
+let MyClass = _class = Decorate(_class = _dec4(_class = _dec3(((_class = class MyClass {
+    constructor(private generic: Generic<A>, generic2: Generic<A, B>){
+    }
+    method(generic: Inter<A>, generic2: InterGen<A, B>) {
+    }
+}) || _class, _dec = function(target, key) {
+    return Arg()(target, key, 1);
+}, _dec1 = Reflect.metadata("design:type", Function), _dec2 = Reflect.metadata("design:paramtypes", [
+    typeof Inter === "undefined" ? Object : Inter,
+    typeof InterGen === "undefined" ? Object : InterGen
+]), _applyDecoratedDescriptor(_class.prototype, "method", [
+    Run,
+    _dec,
+    _dec1,
+    _dec2
+], Object.getOwnPropertyDescriptor(_class.prototype, "method"), _class.prototype), _class)) || _class) || _class) || _class;
+"#
+);
+
+test!(
+    ts(),
+    |_| decorators(Config {
+        legacy: true,
+        emit_metadata: true,
+    }),
+    legacy_metadata_generics_1,
+    "@Decorate
+class MyClass {
+  constructor(
+    private generic: Generic<A>,
+    generic2: Generic<A, B>
+  ) {}
+}",
+    r#"var _class;
+    var _dec = Reflect.metadata("design:paramtypes", [
+        typeof Generic === "undefined" ? Object : Generic,
+        typeof Generic === "undefined" ? Object : Generic
+    ]), _dec1 = Reflect.metadata("design:type", Function);
+    let MyClass = _class = Decorate(_class = _dec1(_class = _dec((_class = class MyClass {
+        constructor(private generic: Generic<A>, generic2: Generic<A, B>){
+        }
+    }) || _class) || _class) || _class) || _class;
+    "#
+);
+
+test!(
+    ts(),
+    |_| decorators(Config {
+        legacy: true,
+        emit_metadata: true,
+    }),
+    legacy_metadata_nest_injection,
+    "import { AppService } from './app.service';
+
+    import { Session, Res } from '@nestjs/common';
+    import * as express from 'express';
+
+    @Controller()
+    export class AppController {
+      constructor(private appService: AppService) {}
+    
+      @Inject()
+      appService: AppService;
+    
+      @Inject()
+      private appService2: AppService;
+    
+      @Get()
+      getHello(): string {
+        return this.appService.getHello();
+      }
+
+      @Get('/callback')
+      callback(@Res() res: express.Response, @Session() session: express.Express.Session) {
+        const token = await this.getToken(code)
+        const user = await this.getUserInfo(token.access_token)
+
+        session.oauth2Token = token
+        session.user = user
+        return res.redirect(state.returnUrl ?? '/')
+      }
+    }",
+    r#"var _class, _descriptor, _descriptor1, _dec, _dec1, _dec2, _dec3, _dec4, _dec5, _dec6, _dec7;
+    import { AppService } from "./app.service";
+    import { Session, Res } from "@nestjs/common";
+    import * as express from "express";
+    var _dec8 = Inject(), _dec9 = Reflect.metadata("design:type", typeof AppService === "undefined" ? Object : AppService), _dec10 = Inject(), _dec11 = Reflect.metadata("design:type", typeof AppService === "undefined" ? Object : AppService), _dec12 = Reflect.metadata("design:paramtypes", [
+        typeof AppService === "undefined" ? Object : AppService
+    ]), _dec13 = Reflect.metadata("design:type", Function), _dec14 = Controller();
+    export let AppController = _class = _dec14(_class = _dec13(_class = _dec12(((_class = class AppController {
+        constructor(private appService: AppService){
+            _initializerDefineProperty(this, "appService", _descriptor, this);
+            _initializerDefineProperty(this, "appService2", _descriptor1, this);
+        }
+        getHello(): string {
+            return this.appService.getHello();
+        }
+        callback(res: express.Response, session: express.Express.Session) {
+            const token = await this.getToken(code);
+            const user = await this.getUserInfo(token.access_token);
+            session.oauth2Token = token;
+            session.user = user;
+            return res.redirect(state.returnUrl ?? "/");
+        }
+    }) || _class, _descriptor = _applyDecoratedDescriptor(_class.prototype, "appService", [
+        _dec8,
+        _dec9
+    ], {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        initializer: void 0,
+    }), _descriptor1 = _applyDecoratedDescriptor(_class.prototype, "appService2", [
+        _dec10,
+        _dec11
+    ], {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        initializer: void 0,
+    }), _dec = Get(), _dec1 = Reflect.metadata("design:type", Function), _dec2 = Reflect.metadata("design:paramtypes", []), _applyDecoratedDescriptor(_class.prototype, "getHello", [
+        _dec,
+        _dec1,
+        _dec2
+    ], Object.getOwnPropertyDescriptor(_class.prototype, "getHello"), _class.prototype), _dec3 = Get("/callback"), _dec4 = function(target, key) {
+        return Res()(target, key, 0);
+    }, _dec5 = function(target, key) {
+        return Session()(target, key, 1);
+    }, _dec6 = Reflect.metadata("design:type", Function), _dec7 = Reflect.metadata("design:paramtypes", [
+        typeof express === "undefined" || typeof express.Response === "undefined" ? Object : express.Response,
+        typeof express === "undefined" || typeof express.Express === "undefined" || typeof express.Express.Session === "undefined" ? Object : express.Express.Session
+    ]), _applyDecoratedDescriptor(_class.prototype, "callback", [
+        _dec3,
+        _dec4,
+        _dec5,
+        _dec6,
+        _dec7
+    ], Object.getOwnPropertyDescriptor(_class.prototype, "callback"), _class.prototype), _class)) || _class) || _class) || _class;"#
+);
+
+test!(
+    ts(),
+    |_| decorators(Config {
+        legacy: true,
+        emit_metadata: true,
+    }),
+    legacy_metadata_parameter_decorated_types,
+    "class Injected {}
+
+    class MyClass {
+      constructor(@inject() parameter: Injected) {}  
+    }
+    
+    class MyOtherClass {
+      constructor(
+        @inject() private readonly parameter: Injected, 
+        @inject('KIND') otherParam: Injected
+      ) {}
+    
+      methodUndecorated(@demo() param: string, otherParam) {}
+    
+      @decorate('named')
+      method(@inject() param: Injected, @arg() schema: Schema) {}
+    }
+    
+    @Decorate
+    class DecoratedClass {
+      constructor(
+        @inject() private readonly module: Injected,
+        @inject() otherModule: Injected
+      ) {}
+      
+      @decorate('example')
+      method(@inject() param: string) {}
+    }",
+    r##"
+    var _class, _class1, _dec, _dec1, _dec2, _dec3, _dec4, _dec5, _dec6, _dec7, _class2, _dec8, _dec9, _dec10, _dec11;
+    class Injected {
+    }
+    var _dec12 = Reflect.metadata("design:paramtypes", [
+        typeof Injected === "undefined" ? Object : Injected
+    ]), _dec13 = Reflect.metadata("design:type", Function), _dec14 = function(target, key) {
+        return inject()(target, undefined, 0);
+    };
+    let MyClass = _class = _dec14(_class = _dec13(_class = _dec12((_class = class MyClass {
+        constructor(parameter: Injected){
+        }
+    }) || _class) || _class) || _class) || _class;
+    var _dec15 = Reflect.metadata("design:paramtypes", [
+        typeof Injected === "undefined" ? Object : Injected,
+        typeof Injected === "undefined" ? Object : Injected
+    ]), _dec16 = Reflect.metadata("design:type", Function), _dec17 = function(target, key) {
+        return inject("KIND")(target, undefined, 1);
+    }, _dec18 = function(target, key) {
+        return inject()(target, undefined, 0);
+    };
+    let MyOtherClass = _class1 = _dec18(_class1 = _dec17(_class1 = _dec16(_class1 = _dec15(((_class1 = class MyOtherClass {
+        constructor(private readonly parameter: Injected, otherParam: Injected){
+        }
+        methodUndecorated(param: string, otherParam) {
+        }
+        method(param: Injected, schema: Schema) {
+        }
+    }) || _class1, _dec = function(target, key) {
+        return demo()(target, key, 0);
+    }, _dec1 = Reflect.metadata("design:type", Function), _dec2 = Reflect.metadata("design:paramtypes", [
+        String,
+        void 0
+    ]), _applyDecoratedDescriptor(_class1.prototype, "methodUndecorated", [
+        _dec,
+        _dec1,
+        _dec2
+    ], Object.getOwnPropertyDescriptor(_class1.prototype, "methodUndecorated"), _class1.prototype), _dec3 = decorate("named"), _dec4 = function(target, key) {
+        return inject()(target, key, 0);
+    }, _dec5 = function(target, key) {
+        return arg()(target, key, 1);
+    }, _dec6 = Reflect.metadata("design:type", Function), _dec7 = Reflect.metadata("design:paramtypes", [
+        typeof Injected === "undefined" ? Object : Injected,
+        typeof Schema === "undefined" ? Object : Schema
+    ]), _applyDecoratedDescriptor(_class1.prototype, "method", [
+        _dec3,
+        _dec4,
+        _dec5,
+        _dec6,
+        _dec7
+    ], Object.getOwnPropertyDescriptor(_class1.prototype, "method"), _class1.prototype), _class1)) || _class1) || _class1) || _class1) || _class1;
+    var _dec19 = Reflect.metadata("design:paramtypes", [
+        typeof Injected === "undefined" ? Object : Injected,
+        typeof Injected === "undefined" ? Object : Injected
+    ]), _dec20 = Reflect.metadata("design:type", Function), _dec21 = function(target, key) {
+        return inject()(target, undefined, 1);
+    }, _dec22 = function(target, key) {
+        return inject()(target, undefined, 0);
+    };
+    let DecoratedClass = _class2 = Decorate(_class2 = _dec22(_class2 = _dec21(_class2 = _dec20(_class2 = _dec19(((_class2 = class DecoratedClass {
+        constructor(private readonly module: Injected, otherModule: Injected){
+        }
+        method(param: string) {
+        }
+    }) || _class2, _dec8 = decorate("example"), _dec9 = function(target, key) {
+        return inject()(target, key, 0);
+    }, _dec10 = Reflect.metadata("design:type", Function), _dec11 = Reflect.metadata("design:paramtypes", [
+        String
+    ]), _applyDecoratedDescriptor(_class2.prototype, "method", [
+        _dec8,
+        _dec9,
+        _dec10,
+        _dec11
+    ], Object.getOwnPropertyDescriptor(_class2.prototype, "method"), _class2.prototype), _class2)) || _class2) || _class2) || _class2) || _class2) || _class2;
+    "##
+);
+
+test!(
+    ts(),
+    |_| decorators(Config {
+        legacy: true,
+        emit_metadata: true,
+    }),
+    legacy_metadata_type_serialization,
+    "import { Service } from './service';
+    import { Decorate } from './Decorate';
+    
+    const sym = Symbol();
+    
+    @Decorate()
+    class Sample {
+      constructor(
+        private p0: String,
+        p1: Number,
+        p2: 10,
+        p3: 'ABC',    
+        p4: boolean,
+        p5: string,
+        p6: number,
+        p7: Object,
+        p8: () => any,
+        p9: 'abc' | 'def',
+        p10: String | Number,
+        p11: Function,
+        p12: null,
+        p13: undefined,
+        p14: any,
+        p15: (abc: any) => void,
+        p16: false,
+        p17: true,
+        p18: string = 'abc'
+      ) {}
+    
+      @Decorate
+      method(
+        @Arg() p0: Symbol,
+        p1: typeof sym,
+        p2: string | null,
+        p3: never,
+        p4: string | never,
+        p5: (string | null),
+        p6: Maybe<string>,
+        p7: Object | string,
+        p8: string & MyStringType,
+        p9: string[],
+        p10: [string, number],
+        p11: void,
+        p12: this is number,
+        p13: null | undefined,
+        p14: (string | (string | null)),
+        p15: Object,
+        p16: any,
+        p17: bigint,
+      ) {}
+    
+      /**
+       * Member Expression
+       */
+      @Decorate()
+      method2(
+        p0: Decorate.Name = 'abc',
+        p1: Decorate.Name 
+      ) {}
+    
+      /**
+       * Assignments
+       */
+      @Decorate()
+      assignments(
+        p0: string = 'abc'
+      ) {}
+    }",
+    r##"var _class, _dec, _dec1, _dec2, _dec3, _dec4, _dec5, _dec6, _dec7, _dec8;
+import { Service } from "./service";
+import { Decorate } from "./Decorate";
+const sym = Symbol();
+var _dec9 = Reflect.metadata("design:paramtypes", [
+    typeof String === "undefined" ? Object : String,
+    typeof Number === "undefined" ? Object : Number,
+    Number,
+    String,
+    Boolean,
+    String,
+    Number,
+    typeof Object === "undefined" ? Object : Object,
+    Function,
+    void 0,
+    Object,
+    typeof Function === "undefined" ? Object : Function,
+    void 0,
+    void 0,
+    Object,
+    Function,
+    Boolean,
+    Boolean,
+    void 0
+]), _dec10 = Reflect.metadata("design:type", Function), _dec11 = Decorate();
+let Sample = _class = _dec11(_class = _dec10(_class = _dec9(((_class = class Sample {
+    constructor(private p0: String, p1: Number, p2: 10, p3: "ABC", p4: boolean, p5: string, p6: number, p7: Object, p8: () => any, p9: "abc" | "def", p10: String | Number, p11: Function, p12: null, p13: undefined, p14: any, p15: (abc: any) => void, p16: falsee, p17: true, p18: string = "abc"){
+    }
+    method(p0: Symbol, p1: typeof sym, p2: string | null, p3: never, p4: string | never, p5: (string | null), p6: Maybe<string>, p7: Object | string, p8: string & MyStringType, p9: string[], p10: [string, number], p11: void, p12: this is number, p13: null | undefined, p14: (string | (string | null)), p15: Object, p16: any, p17: bigint) {
+    }
+    method2(p0: Decorate.Name. = "abc", p1: Decorate.Name.) {
+    }
+    assignments(p0: string = "abc") {
+    }
+}) || _class, _dec = function(target, key) {
+    return Arg()(target, key, 0);
+}, _dec1 = Reflect.metadata("design:type", Function), _dec2 = Reflect.metadata("design:paramtypes", [
+    typeof Symbol === "undefined" ? Object : Symbol,
+    Object,
+    void 0,
+    void 0,
+    void 0,
+    void 0,
+    typeof Maybe === "undefined" ? Object : Maybe,
+    Object,
+    Object,
+    Array,
+    Array,
+    void 0,
+    Boolean,
+    void 0,
+    Object,
+    typeof Object === "undefined" ? Object : Object,
+    Object,
+    Number
+]), _applyDecoratedDescriptor(_class.prototype, "method", [
+    Decorate,
+    _dec,
+    _dec1,
+    _dec2
+], Object.getOwnPropertyDescriptor(_class.prototype, "method"), _class.prototype), _dec3 = Decorate(), _dec4 = Reflect.metadata("design:type", Function), _dec5 = Reflect.metadata("design:paramtypes", [
+    void 0,
+    typeof Decorate === "undefined" || typeof Decorate.Name === "undefined" ? Object : Decorate.Name
+]), _applyDecoratedDescriptor(_class.prototype, "method2", [
+    _dec3,
+    _dec4,
+    _dec5
+], Object.getOwnPropertyDescriptor(_class.prototype, "method2"), _class.prototype), _dec6 = Decorate(), _dec7 = Reflect.metadata("design:type", Function), _dec8 = Reflect.metadata("design:paramtypes", [
+    void 0
+]), _applyDecoratedDescriptor(_class.prototype, "assignments", [
+    _dec6,
+    _dec7,
+    _dec8
+], Object.getOwnPropertyDescriptor(_class.prototype, "assignments"), _class.prototype), _class)) || _class) || _class) || _class;"##,
+    ok_if_code_eq
 );

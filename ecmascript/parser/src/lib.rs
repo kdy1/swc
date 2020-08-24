@@ -40,73 +40,68 @@
 //! #[macro_use]
 //! extern crate swc_common;
 //! extern crate swc_ecma_parser;
-//! use std::sync::Arc;
+//! use swc_common::sync::Lrc;
 //! use swc_common::{
 //!     errors::{ColorConfig, Handler},
 //!     FileName, FilePathMapping, SourceMap,
 //! };
-//! use swc_ecma_parser::{lexer::Lexer, Parser, Session, SourceFileInput, Syntax};
+//! use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 //!
 //! fn main() {
-//!     swc_common::GLOBALS.set(&swc_common::Globals::new(), || {
-//!         let cm: Arc<SourceMap> = Default::default();
-//!         let handler =
-//!             Handler::with_tty_emitter(ColorConfig::Auto, true, false,
-//! Some(cm.clone()));
+//!     let cm: Lrc<SourceMap> = Default::default();
+//!     let handler =
+//!         Handler::with_tty_emitter(ColorConfig::Auto, true, false,
+//!         Some(cm.clone()));
 //!
-//!         let session = Session { handler: &handler };
+//!     // Real usage
+//!     // let fm = cm
+//!     //     .load_file(Path::new("test.js"))
+//!     //     .expect("failed to load test.js");
+//!     let fm = cm.new_source_file(
+//!         FileName::Custom("test.js".into()),
+//!         "function foo() {}".into(),
+//!     );
+//!     let lexer = Lexer::new(
+//!         // We want to parse ecmascript
+//!         Syntax::Es(Default::default()),
+//!         // JscTarget defaults to es5
+//!         Default::default(),
+//!         StringInput::from(&*fm),
+//!         None,
+//!     );
 //!
-//!         // Real usage
-//!         // let fm = cm
-//!         //     .load_file(Path::new("test.js"))
-//!         //     .expect("failed to load test.js");
+//!     let mut parser = Parser::new_from(lexer);
 //!
+//!     for e in parser.take_errors() {
+//!         e.into_diagnostic(&handler).emit();
+//!     }
 //!
-//!         let fm = cm.new_source_file(
-//!             FileName::Custom("test.js".into()),
-//!             "function foo() {}".into(),
-//!         );
-//!         let lexer = Lexer::new(
-//!             session,
-//!             Syntax::Es(Default::default()),
-//!              Default::default(),
-//!             SourceFileInput::from(&*fm),
-//!             None,
-//!         );
-//!
-//!         let mut parser = Parser::new_from(session, lexer);
-//!
-//!
-//!         let _module = parser
-//!             .parse_module()
-//!             .map_err(|mut e| {
-//!                 e.emit();
-//!                 ()
-//!             })
-//!             .expect("failed to parser module");
-//!     });
+//!     let _module = parser
+//!         .parse_module()
+//!         .map_err(|mut e| {
+//!             // Unrecoverable fatal error occurred
+//!             e.into_diagnostic(&handler).emit()
+//!         })
+//!         .expect("failed to parser module");
 //! }
 //! ```
 //!
 //!
 //! [tc39/test262]:https://github.com/tc39/test262
 
-#![cfg_attr(any(test, feature = "fold"), feature(specialization))]
-#![cfg_attr(test, feature(box_syntax))]
 #![cfg_attr(test, feature(test))]
-#![deny(unreachable_patterns)]
-#![deny(unsafe_code)]
+#![deny(unused)]
 
 pub use self::{
-    lexer::input::{Input, SourceFileInput},
+    lexer::input::{Input, StringInput},
     parser::*,
 };
 use serde::{Deserialize, Serialize};
-use swc_common::{errors::Handler, Span, SpanData};
+use swc_common::Span;
 
 #[macro_use]
 mod macros;
-mod error;
+pub mod error;
 pub mod lexer;
 mod parser;
 pub mod token;
@@ -138,14 +133,7 @@ impl Syntax {
     }
 
     pub fn optional_chaining(self) -> bool {
-        match self {
-            Syntax::Es(EsConfig {
-                optional_chaining: true,
-                ..
-            })
-            | Syntax::Typescript(TsConfig { .. }) => true,
-            _ => false,
-        }
+        true
     }
 
     pub fn dynamic_import(self) -> bool {
@@ -170,10 +158,7 @@ impl Syntax {
     }
 
     pub fn num_sep(self) -> bool {
-        match self {
-            Syntax::Es(EsConfig { num_sep: true, .. }) | Syntax::Typescript(..) => true,
-            _ => false,
-        }
+        true
     }
 
     pub fn decorators(self) -> bool {
@@ -189,13 +174,7 @@ impl Syntax {
     }
 
     pub fn class_private_methods(self) -> bool {
-        match self {
-            Syntax::Es(EsConfig {
-                class_private_methods: true,
-                ..
-            }) => true,
-            _ => false,
-        }
+        true
     }
 
     pub fn class_private_props(self) -> bool {
@@ -210,15 +189,7 @@ impl Syntax {
     }
 
     pub fn class_props(self) -> bool {
-        if self.typescript() {
-            return true;
-        }
-        match self {
-            Syntax::Es(EsConfig {
-                class_props: true, ..
-            }) => true,
-            _ => false,
-        }
+        true
     }
 
     pub fn decorators_before_export(self) -> bool {
@@ -262,15 +233,7 @@ impl Syntax {
     }
 
     pub fn nullish_coalescing(self) -> bool {
-        match self {
-            Syntax::Es(EsConfig {
-                nullish_coalescing: true,
-                ..
-            })
-            | Syntax::Typescript(..) => true,
-
-            _ => false,
-        }
+        true
     }
 
     pub fn import_meta(self) -> bool {
@@ -347,6 +310,8 @@ pub enum JscTarget {
     Es2018,
     #[serde(rename = "es2019")]
     Es2019,
+    #[serde(rename = "es2020")]
+    Es2020,
 }
 
 impl Default for JscTarget {
@@ -454,27 +419,21 @@ pub struct Context {
     in_property_name: bool,
 
     in_forced_jsx_context: bool,
-}
 
-#[derive(Clone, Copy)]
-pub struct Session<'a> {
-    pub handler: &'a Handler,
+    /// If true, `:` should not be treated as a type annotation.
+    in_case_cond: bool,
 }
 
 #[cfg(test)]
 fn with_test_sess<F, Ret>(src: &str, f: F) -> Result<Ret, ::testing::StdErr>
 where
-    F: FnOnce(Session<'_>, SourceFileInput<'_>) -> Result<Ret, ()>,
+    F: FnOnce(&swc_common::errors::Handler, StringInput<'_>) -> Result<Ret, ()>,
 {
     use swc_common::FileName;
 
     ::testing::run_test(false, |cm, handler| {
         let fm = cm.new_source_file(FileName::Real("testing".into()), src.into());
 
-        f(Session { handler: &handler }, (&*fm).into())
+        f(handler, (&*fm).into())
     })
-}
-
-fn make_span(data: SpanData) -> Span {
-    Span::new(data.lo, data.hi, data.ctxt)
 }

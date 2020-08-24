@@ -1,19 +1,20 @@
-use crate::{
-    pass::Pass,
-    util::{
-        drop_span,
-        options::{CM, SESSION},
-    },
-};
+#![cfg(feature = "const-modules")]
+
+use crate::util::drop_span;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::Arc};
 use swc_atoms::JsWord;
-use swc_common::{util::move_map::MoveMap, FileName, Fold, FoldWith};
+use swc_common::{sync::Lrc, util::move_map::MoveMap, FileName, SourceMap};
 use swc_ecma_ast::*;
-use swc_ecma_parser::{lexer::Lexer, Parser, SourceFileInput};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput};
+use swc_ecma_utils::HANDLER;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
 
-pub fn const_modules(globals: HashMap<JsWord, HashMap<JsWord, String>>) -> impl Pass {
+pub fn const_modules(
+    cm: Lrc<SourceMap>,
+    globals: HashMap<JsWord, HashMap<JsWord, String>>,
+) -> impl Fold {
     ConstModules {
         globals: globals
             .into_iter()
@@ -21,7 +22,7 @@ pub fn const_modules(globals: HashMap<JsWord, HashMap<JsWord, String>>) -> impl 
                 let map = map
                     .into_iter()
                     .map(|(key, value)| {
-                        let value = parse_option(&key, value);
+                        let value = parse_option(&cm, &key, value);
 
                         (key, value)
                     })
@@ -34,25 +35,26 @@ pub fn const_modules(globals: HashMap<JsWord, HashMap<JsWord, String>>) -> impl 
     }
 }
 
-fn parse_option(name: &str, src: String) -> Arc<Expr> {
-    static CACHE: Lazy<DashMap<Arc<String>, Arc<Expr>>> = Lazy::new(|| DashMap::default());
+fn parse_option(cm: &SourceMap, name: &str, src: String) -> Arc<Expr> {
+    static CACHE: Lazy<DashMap<String, Arc<Expr>>> = Lazy::new(|| DashMap::default());
 
-    let fm = CM.new_source_file(FileName::Custom(format!("<const-module-{}.js>", name)), src);
-    if let Some(expr) = CACHE.get(&fm.src) {
+    let fm = cm.new_source_file(FileName::Custom(format!("<const-module-{}.js>", name)), src);
+    if let Some(expr) = CACHE.get(&**fm.src) {
         return expr.clone();
     }
 
     let lexer = Lexer::new(
-        *SESSION,
         Default::default(),
         Default::default(),
-        SourceFileInput::from(&*fm),
+        StringInput::from(&*fm),
         None,
     );
-    let expr = Parser::new_from(*SESSION, lexer)
+    let expr = Parser::new_from(lexer)
         .parse_expr()
-        .map_err(|mut e| {
-            e.emit();
+        .map_err(|e| {
+            if HANDLER.is_set() {
+                HANDLER.with(|h| e.into_diagnostic(h).emit())
+            }
         })
         .map(drop_span)
         .unwrap_or_else(|()| {
@@ -64,7 +66,7 @@ fn parse_option(name: &str, src: String) -> Arc<Expr> {
 
     let expr = Arc::new(*expr);
 
-    CACHE.insert(fm.src.clone(), expr.clone());
+    CACHE.insert((*fm.src).clone(), expr.clone());
 
     expr
 }
@@ -74,18 +76,15 @@ struct ConstModules {
     scope: Scope,
 }
 
-noop_fold_type!(ConstModules);
-
 #[derive(Default)]
 struct Scope {
     imported: HashMap<JsWord, Arc<Expr>>,
 }
 
-impl Fold<Vec<ModuleItem>> for ConstModules
-where
-    Vec<ModuleItem>: FoldWith<Self>,
-{
-    fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
+impl Fold for ConstModules {
+    noop_fold_type!();
+
+    fn fold_module_items(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
         items.move_flat_map(|item| match item {
             ModuleItem::ModuleDecl(ModuleDecl::Import(import)) => {
                 let entry = self.globals.get(&import.src.value);
@@ -118,10 +117,8 @@ where
             _ => Some(item.fold_with(self)),
         })
     }
-}
 
-impl Fold<Expr> for ConstModules {
-    fn fold(&mut self, expr: Expr) -> Expr {
+    fn fold_expr(&mut self, expr: Expr) -> Expr {
         let expr = match expr {
             Expr::Member(expr) => {
                 if expr.computed {
@@ -137,7 +134,7 @@ impl Fold<Expr> for ConstModules {
                     })
                 }
             }
-            _ => expr.fold_children(self),
+            _ => expr.fold_children_with(self),
         };
         match expr {
             Expr::Ident(Ident { ref sym, .. }) => {

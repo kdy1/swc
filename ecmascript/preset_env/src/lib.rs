@@ -1,7 +1,3 @@
-#![feature(box_syntax)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-#![feature(trace_macros)]
 #![recursion_limit = "256"]
 
 pub use self::{transform_data::Feature, version::Version};
@@ -15,13 +11,14 @@ use std::{
     process::Command,
 };
 use swc_atoms::{js_word, JsWord};
-use swc_common::{chain, Fold, FoldWith, FromVariant, Mark, VisitWith, DUMMY_SP};
+use swc_common::{chain, FromVariant, Mark, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_transforms::{
-    compat::{es2015, es2016, es2017, es2018, es3},
-    pass::{noop, Optional, Pass},
+    compat::{es2015, es2016, es2017, es2018, es2020, es3},
+    pass::{noop, Optional},
     util::prepend_stmts,
 };
+use swc_ecma_visit::{Fold, FoldWith, VisitWith};
 
 #[macro_use]
 mod util;
@@ -31,7 +28,7 @@ mod regenerator;
 mod transform_data;
 mod version;
 
-pub fn preset_env(global_mark: Mark, c: Config) -> impl Pass {
+pub fn preset_env(global_mark: Mark, c: Config) -> impl Fold {
     let loose = c.loose;
     let targets: Versions = c.targets.try_into().expect("failed to parse targets");
     let is_any_target = targets.is_any_target();
@@ -67,6 +64,12 @@ pub fn preset_env(global_mark: Mark, c: Config) -> impl Pass {
         }};
     }
 
+    // ES2020
+
+    let pass = add!(pass, NullishCoalescing, es2020::nullish_coalescing());
+    let pass = add!(pass, OptionalChaining, es2020::optional_chaining());
+    let pass = add!(pass, ClassProperties, es2020::class_properties());
+
     // ES2018
     let pass = add!(pass, ObjectRestSpread, es2018::object_rest_spread());
     let pass = add!(pass, OptionalCatchBinding, es2018::optional_catch_binding());
@@ -78,14 +81,9 @@ pub fn preset_env(global_mark: Mark, c: Config) -> impl Pass {
     let pass = add!(pass, ExponentiationOperator, es2016::exponentation());
 
     // ES2015
-    let pass = add!(pass, BlockScopedFunctions, es2015::BlockScopedFns);
-    let pass = add!(
-        pass,
-        TemplateLiterals,
-        es2015::TemplateLiteral::default(),
-        true
-    );
-    let pass = add!(pass, Classes, es2015::Classes::default());
+    let pass = add!(pass, BlockScopedFunctions, es2015::block_scoped_functions());
+    let pass = add!(pass, TemplateLiterals, es2015::template_literal(), true);
+    let pass = add!(pass, Classes, es2015::classes());
     let pass = add!(
         pass,
         Spread,
@@ -95,10 +93,10 @@ pub fn preset_env(global_mark: Mark, c: Config) -> impl Pass {
     let pass = add!(pass, FunctionName, es2015::function_name());
     let pass = add!(pass, ArrowFunctions, es2015::arrow());
     let pass = add!(pass, DuplicateKeys, es2015::duplicate_keys());
-    let pass = add!(pass, StickyRegex, es2015::StickyRegex);
+    let pass = add!(pass, StickyRegex, es2015::sticky_regex());
     // TODO:    InstanceOf,
-    let pass = add!(pass, TypeOfSymbol, es2015::TypeOfSymbol);
-    let pass = add!(pass, ShorthandProperties, es2015::Shorthand);
+    let pass = add!(pass, TypeOfSymbol, es2015::typeof_symbol());
+    let pass = add!(pass, ShorthandProperties, es2015::shorthand());
     let pass = add!(pass, Parameters, es2015::parameters());
     let pass = add!(
         pass,
@@ -135,15 +133,13 @@ pub fn preset_env(global_mark: Mark, c: Config) -> impl Pass {
     //    NamedCapturingGroupsRegex,
 
     // ES 3
-    let pass = add!(pass, PropertyLiterals, es3::PropertyLiteral);
-    let pass = add!(pass, MemberExpressionLiterals, es3::MemberExprLit);
+    let pass = add!(pass, PropertyLiterals, es3::property_literals());
     let pass = add!(
         pass,
-        ReservedWords,
-        es3::ReservedWord {
-            preserve_import: c.dynamic_import
-        }
+        MemberExpressionLiterals,
+        es3::member_expression_literals()
     );
+    let pass = add!(pass, ReservedWords, es3::reserved_words(c.dynamic_import));
 
     if c.debug {
         println!("Targets: {:?}", targets);
@@ -210,8 +206,8 @@ struct Polyfills {
     excludes: FxHashSet<String>,
 }
 
-impl Fold<Module> for Polyfills {
-    fn fold(&mut self, mut m: Module) -> Module {
+impl Fold for Polyfills {
+    fn fold_module(&mut self, mut m: Module) -> Module {
         let span = m.span;
 
         let required = match self.mode {
@@ -220,14 +216,14 @@ impl Fold<Module> for Polyfills {
                 let mut r = match self.corejs {
                     Version { major: 2, .. } => {
                         let mut v = corejs2::UsageVisitor::new(self.targets);
-                        m.visit_with(&mut v);
+                        m.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
 
                         v.required
                     }
                     Version { major: 3, .. } => {
                         let mut v =
                             corejs3::UsageVisitor::new(self.targets, self.shipped_proposals);
-                        m.visit_with(&mut v);
+                        m.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
                         v.required
                     }
 
@@ -326,10 +322,8 @@ impl Fold<Module> for Polyfills {
 
         m
     }
-}
 
-impl Fold<Script> for Polyfills {
-    fn fold(&mut self, _: Script) -> Script {
+    fn fold_script(&mut self, _: Script) -> Script {
         unimplemented!("automatic polyfill for scripts")
     }
 }

@@ -1,13 +1,13 @@
 //! 12.1 Identifiers
 use super::*;
-use crate::{make_span, token::Keyword};
+use crate::token::Keyword;
 use either::Either;
 use swc_atoms::js_word;
 use swc_ecma_parser_macros::parser;
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
-    pub(super) fn parse_maybe_private_name(&mut self) -> PResult<'a, Either<PrivateName, Ident>> {
+impl<'a, I: Tokens> Parser<I> {
+    pub(super) fn parse_maybe_private_name(&mut self) -> PResult<Either<PrivateName, Ident>> {
         let start = cur_pos!();
         let is_private = is!('#');
 
@@ -18,7 +18,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }
     }
 
-    pub(super) fn parse_private_name(&mut self) -> PResult<'a, PrivateName> {
+    pub(super) fn parse_private_name(&mut self) -> PResult<PrivateName> {
         let start = cur_pos!();
         assert_and_bump!('#');
 
@@ -35,14 +35,14 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 
     /// IdentifierReference
-    pub(super) fn parse_ident_ref(&mut self) -> PResult<'a, Ident> {
+    pub(super) fn parse_ident_ref(&mut self) -> PResult<Ident> {
         let ctx = self.ctx();
 
         self.parse_ident(!ctx.in_generator, !ctx.in_async)
     }
 
     /// LabelIdentifier
-    pub(super) fn parse_label_ident(&mut self) -> PResult<'a, Ident> {
+    pub(super) fn parse_label_ident(&mut self) -> PResult<Ident> {
         let ctx = self.ctx();
 
         self.parse_ident(!ctx.in_generator, !ctx.in_async)
@@ -50,7 +50,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
 
     /// Use this when spec says "IdentifierName".
     /// This allows idents like `catch`.
-    pub(super) fn parse_ident_name(&mut self) -> PResult<'a, Ident> {
+    pub(super) fn parse_ident_name(&mut self) -> PResult<Ident> {
         let start = cur_pos!();
 
         let w = match cur!(true) {
@@ -67,7 +67,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     /// Identifier
     ///
     /// In strict mode, "yield" is SyntaxError if matched.
-    pub(super) fn parse_ident(&mut self, incl_yield: bool, incl_await: bool) -> PResult<'a, Ident> {
+    pub(super) fn parse_ident(&mut self, incl_yield: bool, incl_await: bool) -> PResult<Ident> {
         trace_cur!(parse_ident);
 
         let start = cur_pos!();
@@ -88,10 +88,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
             // "package", "private", "protected",  "public", "static", or "yield".
             match w {
                 Word::Ident(js_word!("enum")) => {
-                    p.emit_err(
-                        make_span(p.input.prev_span()),
-                        SyntaxError::InvalidIdentInStrict,
-                    );
+                    p.emit_err(p.input.prev_span(), SyntaxError::InvalidIdentInStrict);
                 }
                 Word::Keyword(Keyword::Yield)
                 | Word::Ident(js_word!("static"))
@@ -104,10 +101,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 | Word::Ident(js_word!("public"))
                     if strict =>
                 {
-                    p.emit_err(
-                        make_span(p.input.prev_span()),
-                        SyntaxError::InvalidIdentInStrict,
-                    );
+                    p.emit_err(p.input.prev_span(), SyntaxError::InvalidIdentInStrict);
                 }
                 _ => {}
             }
@@ -119,13 +113,13 @@ impl<'a, I: Tokens> Parser<'a, I> {
 
             match w {
                 Word::Keyword(Keyword::Await) if p.input.syntax().typescript() => {
-                    Ok(js_word!("this"))
+                    Ok(js_word!("await"))
                 }
 
                 // It is a Syntax Error if the goal symbol of the syntactic grammar is Module
                 // and the StringValue of IdentifierName is "await".
                 Word::Keyword(Keyword::Await) if p.ctx().module => {
-                    syntax_error!(make_span(p.input.prev_span()), SyntaxError::ExpectedIdent)
+                    syntax_error!(p.input.prev_span(), SyntaxError::ExpectedIdent)
                 }
                 Word::Keyword(Keyword::This) if p.input.syntax().typescript() => {
                     Ok(js_word!("this"))
@@ -135,7 +129,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 Word::Keyword(Keyword::Yield) if incl_yield => Ok(js_word!("yield")),
                 Word::Keyword(Keyword::Await) if incl_await => Ok(js_word!("await")),
                 Word::Keyword(..) | Word::Null | Word::True | Word::False => {
-                    syntax_error!(make_span(p.input.prev_span()), SyntaxError::ExpectedIdent)
+                    syntax_error!(p.input.prev_span(), SyntaxError::ExpectedIdent)
                 }
             }
         })?;
@@ -144,16 +138,16 @@ impl<'a, I: Tokens> Parser<'a, I> {
     }
 }
 
-pub(super) trait MaybeOptionalIdentParser<'a, Ident> {
-    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<'a, Ident>;
+pub(super) trait MaybeOptionalIdentParser<Ident> {
+    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<Ident>;
 }
-impl<'a, I: Tokens> MaybeOptionalIdentParser<'a, Ident> for Parser<'a, I> {
-    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<'a, Ident> {
+impl<I: Tokens> MaybeOptionalIdentParser<Ident> for Parser<I> {
+    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<Ident> {
         self.parse_binding_ident()
     }
 }
-impl<'a, I: Tokens> MaybeOptionalIdentParser<'a, Option<Ident>> for Parser<'a, I> {
-    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<'a, Option<Ident>> {
+impl<I: Tokens> MaybeOptionalIdentParser<Option<Ident>> for Parser<I> {
+    fn parse_maybe_opt_binding_ident(&mut self) -> PResult<Option<Ident>> {
         self.parse_opt_binding_ident()
     }
 }

@@ -1,5 +1,5 @@
-use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
 
 /// Compile ES2015 shorthand properties to ES5
 ///
@@ -35,26 +35,30 @@ use swc_ecma_ast::*;
 ///   }
 /// };
 /// ```
-#[derive(Default, Clone, Copy)]
-pub struct Shorthand;
+pub fn shorthand() -> impl 'static + Fold {
+    Shorthand
+}
 
-noop_fold_type!(Shorthand);
+#[derive(Clone, Copy)]
+struct Shorthand;
 
-impl Fold<Prop> for Shorthand {
-    fn fold(&mut self, prop: Prop) -> Prop {
-        let prop = prop.fold_children(self);
+impl Fold for Shorthand {
+    noop_fold_type!();
+
+    fn fold_prop(&mut self, prop: Prop) -> Prop {
+        let prop = prop.fold_children_with(self);
 
         match prop {
             Prop::Shorthand(Ident { sym, span, .. }) => Prop::KeyValue(KeyValueProp {
                 key: PropName::Ident(quote_ident!(span, sym.clone())),
-                value: box quote_ident!(span, sym).into(),
+                value: Box::new(quote_ident!(span, sym).into()),
             }),
             Prop::Method(MethodProp { key, function }) => Prop::KeyValue(KeyValueProp {
                 key,
-                value: box Expr::Fn(FnExpr {
+                value: Box::new(Expr::Fn(FnExpr {
                     ident: None,
                     function,
-                }),
+                })),
             }),
             _ => prop,
         }

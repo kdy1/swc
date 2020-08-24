@@ -1,20 +1,21 @@
-use crate::{pass::Pass, util::IdentExt};
-use swc_common::{Fold, DUMMY_SP};
+use crate::util::IdentExt;
+use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold};
 
 /// `@babel/plugin-proposal-export-default-from` and
 /// `@babel/plugin-proposal-export-namespace-from`
-pub fn export() -> impl Pass {
+pub fn export() -> impl Fold {
     ExportDefaultFrom
 }
 
 #[derive(Clone)]
 struct ExportDefaultFrom;
 
-noop_fold_type!(ExportDefaultFrom);
+impl Fold for ExportDefaultFrom {
+    noop_fold_type!();
 
-impl Fold<Vec<ModuleItem>> for ExportDefaultFrom {
-    fn fold(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
+    fn fold_module_items(&mut self, items: Vec<ModuleItem>) -> Vec<ModuleItem> {
         // Imports
         let mut stmts = Vec::with_capacity(items.len() + 4);
         // Statements except import

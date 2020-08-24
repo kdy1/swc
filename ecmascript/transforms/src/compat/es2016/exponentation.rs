@@ -1,9 +1,10 @@
 use crate::{
-    pass::Pass,
+    ext::PatOrExprExt,
     util::{ExprFactory, StmtLike},
 };
-use swc_common::{Fold, FoldWith, Span, Spanned, Visit, VisitWith, DUMMY_SP};
+use swc_common::{Span, Spanned, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith, Node, Visit, VisitWith};
 
 /// `@babel/plugin-transform-exponentiation-operator`
 ///
@@ -24,24 +25,23 @@ use swc_ecma_ast::*;
 ///
 /// x = Math.pow(x, 3);
 /// ```
-pub fn exponentation() -> impl Pass {
+pub fn exponentation() -> impl Fold {
     Exponentation
 }
+
 #[derive(Clone, Copy)]
 struct Exponentation;
-
-noop_fold_type!(Exponentation);
 
 #[derive(Default)]
 struct AssignFolder {
     vars: Vec<VarDeclarator>,
 }
 
-noop_fold_type!(AssignFolder);
+impl Fold for AssignFolder {
+    noop_fold_type!();
 
-impl Fold<Expr> for AssignFolder {
-    fn fold(&mut self, e: Expr) -> Expr {
-        let e = e.fold_children(self);
+    fn fold_expr(&mut self, e: Expr) -> Expr {
+        let e = e.fold_children_with(self);
 
         match e {
             Expr::Assign(AssignExpr {
@@ -51,8 +51,7 @@ impl Fold<Expr> for AssignFolder {
                 right,
             }) => {
                 let lhs: Ident = match left {
-                    PatOrExpr::Pat(box Pat::Ident(ref i))
-                    | PatOrExpr::Expr(box Expr::Ident(ref i)) => i.clone(),
+                    _ if left.as_ident().is_some() => left.as_ident().unwrap().clone(),
 
                     // unimplemented
                     PatOrExpr::Expr(ref e) => {
@@ -80,7 +79,7 @@ impl Fold<Expr> for AssignFolder {
                     span,
                     left,
                     op: op!("="),
-                    right: box mk_call(span, box lhs.into(), right),
+                    right: Box::new(mk_call(span, Box::new(lhs.into()), right)),
                 })
             }
             Expr::Bin(BinExpr {
@@ -94,15 +93,28 @@ impl Fold<Expr> for AssignFolder {
     }
 }
 
-impl<T: StmtLike + VisitWith<ShouldFold>> Fold<Vec<T>> for Exponentation
-where
-    Vec<T>: FoldWith<Self>,
-{
-    fn fold(&mut self, stmts: Vec<T>) -> Vec<T> {
+impl Fold for Exponentation {
+    noop_fold_type!();
+
+    fn fold_module_items(&mut self, n: Vec<ModuleItem>) -> Vec<ModuleItem> {
+        self.fold_stmt_like(n)
+    }
+
+    fn fold_stmts(&mut self, n: Vec<Stmt>) -> Vec<Stmt> {
+        self.fold_stmt_like(n)
+    }
+}
+
+impl Exponentation {
+    fn fold_stmt_like<T>(&mut self, stmts: Vec<T>) -> Vec<T>
+    where
+        T: StmtLike + VisitWith<ShouldFold>,
+        Vec<T>: FoldWith<Self> + VisitWith<ShouldFold>,
+    {
         if !should_fold(&stmts) {
             return stmts;
         }
-        let stmts = stmts.fold_children(self);
+        let stmts = stmts.fold_children_with(self);
 
         let mut buf = vec![];
 
@@ -149,28 +161,29 @@ where
     N: VisitWith<ShouldFold>,
 {
     let mut v = ShouldFold { found: false };
-    node.visit_with(&mut v);
+    node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
     v.found
 }
 struct ShouldFold {
     found: bool,
 }
-impl Visit<BinExpr> for ShouldFold {
-    fn visit(&mut self, e: &BinExpr) {
+impl Visit for ShouldFold {
+    noop_visit_type!();
+
+    fn visit_bin_expr(&mut self, e: &BinExpr, _: &dyn Node) {
         if e.op == op!("**") {
             self.found = true;
         }
     }
-}
-impl Visit<AssignExpr> for ShouldFold {
-    fn visit(&mut self, e: &AssignExpr) {
+
+    fn visit_assign_expr(&mut self, e: &AssignExpr, _: &dyn Node) {
         if e.op == op!("**=") {
             self.found = true;
         }
 
         if !self.found {
-            e.left.visit_with(self);
-            e.right.visit_with(self);
+            e.left.visit_with(e as _, self);
+            e.right.visit_with(e as _, self);
         }
     }
 }

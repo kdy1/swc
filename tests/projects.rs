@@ -1,10 +1,10 @@
 use rayon::prelude::*;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 use swc::{
-    config::{Config, Options, SourceMapsConfig},
+    config::{Config, JscConfig, ModuleConfig, Options, SourceMapsConfig, TransformConfig},
     Compiler,
 };
-use swc_ecmascript::preset_env;
+use swc_ecma_parser::{Syntax, TsConfig};
 use testing::{NormalizedOutput, StdErr, Tester};
 use walkdir::WalkDir;
 
@@ -20,7 +20,7 @@ fn file(f: &str) -> Result<NormalizedOutput, StdErr> {
 
 fn file_with_opt(f: &str, options: Options) -> Result<NormalizedOutput, StdErr> {
     Tester::new().print_errors(|cm, handler| {
-        let c = Compiler::new(cm.clone(), handler);
+        let c = Compiler::new(cm.clone(), Arc::new(handler));
 
         let fm = cm.load_file(Path::new(f)).expect("failed to load file");
         let s = c.process_js_file(
@@ -39,14 +39,14 @@ fn file_with_opt(f: &str, options: Options) -> Result<NormalizedOutput, StdErr> 
                     Ok(v.code.into())
                 }
             }
-            Err(err) => panic!("Error: {}", err),
+            Err(err) => panic!("Error: {:?}", err),
         }
     })
 }
 fn project(dir: &str) {
     Tester::new()
         .print_errors(|cm, handler| {
-            let c = Compiler::new(cm.clone(), handler);
+            let c = Compiler::new(cm.clone(), Arc::new(handler));
 
             for entry in WalkDir::new(dir) {
                 let entry = entry.unwrap();
@@ -87,7 +87,7 @@ fn project(dir: &str) {
 fn par_project(dir: &str) {
     Tester::new()
         .print_errors(|cm, handler| {
-            let c = Compiler::new(cm.clone(), handler);
+            let c = Compiler::new(cm.clone(), Arc::new(handler));
 
             let entries = WalkDir::new(dir)
                 .into_iter()
@@ -157,7 +157,7 @@ fn issue_225() {
     println!("{}", s);
 
     assert!(s.contains("function _interopRequireDefault"));
-    assert!(s.contains("var _foo = _interopRequireDefault(require('foo'))"));
+    assert!(s.contains("var _foo = _interopRequireDefault(require(\"foo\"))"));
 }
 
 /// should handle exportNamespaceFrom configured by .swcrc
@@ -176,7 +176,7 @@ fn issue_351() {
     let s = file("tests/projects/issue-351/input.js").unwrap();
     println!("{}", s);
 
-    assert!(s.contains(".default.createElement('div', null);"));
+    assert!(s.contains(".default.createElement(\"div\", null);"));
 }
 
 /// should handle cjs imports
@@ -218,7 +218,7 @@ fn issue_409_2() {
 fn issue_414() {
     let s1 = file("tests/projects/issue-414/a.js").unwrap();
     println!("{}", s1);
-    assert!(s1.contains("require('foo')"));
+    assert!(s1.contains("require(\"foo\")"));
 
     let s2 = file("tests/projects/issue-414/b.ts").unwrap();
     println!("{}", s2);
@@ -424,7 +424,7 @@ fn issue_779_1() {
     let f = file("tests/projects/issue-779-1/input.js").unwrap();
     println!("{}", f);
 
-    assert!(f.contains("require('core-js/modules/es.array-buffer.constructor');"))
+    assert!(f.contains("require(\"core-js/modules/es.array-buffer.constructor\");"))
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn issue_779_2() {
     let f = file("tests/projects/issue-779-2/input.js").unwrap();
     println!("{}", f);
 
-    assert!(f.contains("require('core-js');"));
+    assert!(f.contains("require(\"core-js\");"));
 }
 
 #[test]
@@ -440,8 +440,8 @@ fn issue_783() {
     let f = file("tests/projects/issue-783/input.js").unwrap();
     println!("{}", f);
 
-    assert!(!f.contains("require('core-js');"));
-    assert!(f.contains("require('core-js/modules/es.array-buffer.constructor');"))
+    assert!(!f.contains("require(\"core-js\");"));
+    assert!(f.contains("require(\"core-js/modules/es.array-buffer.constructor\");"))
 }
 
 #[test]
@@ -451,9 +451,9 @@ fn issue_783_core_js_2() {
         Options {
             swcrc: false,
             config: Some(Config {
-                env: Some(preset_env::Config {
+                env: Some(swc_ecma_preset_env::Config {
                     core_js: Some("2".parse().unwrap()),
-                    mode: Some(preset_env::Mode::Entry),
+                    mode: Some(swc_ecma_preset_env::Mode::Entry),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -477,8 +477,8 @@ fn issue_783_core_js_3() {
         Options {
             swcrc: false,
             config: Some(Config {
-                env: Some(preset_env::Config {
-                    mode: Some(preset_env::Mode::Entry),
+                env: Some(swc_ecma_preset_env::Config {
+                    mode: Some(swc_ecma_preset_env::Mode::Entry),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -501,4 +501,59 @@ fn issue_801() {
     println!("{}", f);
 
     assert!(!f.contains("function delete"));
+}
+
+#[test]
+fn concurrency() {
+    par_project("tests/deno-unit");
+}
+
+#[test]
+fn issue_879() {
+    let f = file_with_opt(
+        "tests/projects/issue-879/input.ts",
+        Options {
+            is_module: true,
+            config: Some(Config {
+                env: Some(Default::default()),
+                module: Some(ModuleConfig::CommonJs(Default::default())),
+                jsc: JscConfig {
+                    syntax: Some(Syntax::Typescript(TsConfig {
+                        tsx: true,
+                        decorators: true,
+                        ..Default::default()
+                    })),
+                    transform: Some(TransformConfig {
+                        legacy_decorator: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    println!("{}", f);
+
+    assert!(f.find("function X").is_some(), "swc should compile class");
+    assert_eq!(
+        f.find("function X"),
+        f.rfind("function X"),
+        "swc should not emit `function X` twice"
+    );
+}
+
+#[test]
+fn issue_895() {
+    let f = file("tests/projects/issue-895/input.ts").unwrap();
+    println!("{}", f);
+
+    assert!(f.contains("_url ="));
+    assert!(f.contains("_url.queryString"));
+    let s = f.replace("_url =", "").replace("_url.queryString", "");
+
+    assert!(!s.contains("_url."));
+    assert!(!s.contains("_url,"));
 }

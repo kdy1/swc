@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 use swc_atoms::{js_word, JsWord};
-use swc_common::{Fold, FoldWith};
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith};
 
-#[derive(Clone)]
-pub struct InlineGlobals {
-    pub envs: HashMap<JsWord, Expr>,
-    pub globals: HashMap<JsWord, Expr>,
+pub fn inline_globals(envs: HashMap<JsWord, Expr>, globals: HashMap<JsWord, Expr>) -> impl Fold {
+    InlineGlobals { envs, globals }
 }
 
-noop_fold_type!(InlineGlobals);
+struct InlineGlobals {
+    envs: HashMap<JsWord, Expr>,
+    globals: HashMap<JsWord, Expr>,
+}
 
-impl Fold<Expr> for InlineGlobals {
-    fn fold(&mut self, expr: Expr) -> Expr {
+impl Fold for InlineGlobals {
+    noop_fold_type!();
+
+    fn fold_expr(&mut self, expr: Expr) -> Expr {
         let expr = match expr {
             Expr::Member(expr) => {
                 if expr.computed {
@@ -28,72 +31,62 @@ impl Fold<Expr> for InlineGlobals {
                     })
                 }
             }
-            _ => expr.fold_children(self),
+            _ => expr.fold_children_with(self),
         };
 
         match expr {
             Expr::Ident(Ident { ref sym, .. }) => {
                 // It's ok because we don't recurse into member expressions.
-                if let Some(value) = self.globals.get(sym) {
+                return if let Some(value) = self.globals.get(sym) {
                     value.clone().fold_with(self)
                 } else {
                     expr
-                }
+                };
             }
             Expr::Member(MemberExpr {
-                span,
-                obj:
-                    ExprOrSuper::Expr(box Expr::Member(MemberExpr {
-                        obj:
-                            ExprOrSuper::Expr(box Expr::Ident(Ident {
-                                sym: js_word!("process"),
-                                span: process_span,
-                                ..
-                            })),
-                        prop:
-                            box Expr::Ident(Ident {
-                                sym: js_word!("env"),
-                                span: env_span,
-                                ..
-                            }),
-                        span: obj_span,
-                        computed: obj_computed,
-                    })),
-                prop,
-                computed,
-            }) => {
-                match *prop {
-                    Expr::Lit(Lit::Str(Str { value: ref sym, .. }))
-                    | Expr::Ident(Ident { ref sym, .. }) => {
-                        if let Some(env) = self.envs.get(sym) {
-                            return env.clone();
-                        }
-                    }
-                    _ => {}
-                }
+                obj: ExprOrSuper::Expr(ref obj),
+                ref prop,
+                ..
+            }) => match &**obj {
                 Expr::Member(MemberExpr {
-                    span,
-                    obj: ExprOrSuper::Expr(box Expr::Member(MemberExpr {
-                        obj: ExprOrSuper::Expr(box Expr::Ident(Ident::new(
-                            js_word!("process"),
-                            process_span,
-                        ))),
-                        prop: box Expr::Ident(Ident::new(js_word!("env"), env_span)),
-                        span: obj_span,
-                        computed: obj_computed,
-                    })),
-                    prop,
-                    computed,
-                })
-            }
-            _ => expr,
+                    obj: ExprOrSuper::Expr(first_obj),
+                    prop: second_obj,
+                    ..
+                }) => match &**first_obj {
+                    Expr::Ident(Ident {
+                        sym: js_word!("process"),
+                        ..
+                    }) => match &**second_obj {
+                        Expr::Ident(Ident {
+                            sym: js_word!("env"),
+                            ..
+                        }) => match &**prop {
+                            Expr::Lit(Lit::Str(Str { value: ref sym, .. }))
+                            | Expr::Ident(Ident { ref sym, .. }) => {
+                                if let Some(env) = self.envs.get(sym) {
+                                    return env.clone();
+                                }
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                },
+                _ => {}
+            },
+            _ => {}
         }
+
+        expr
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use swc_ecma_utils::DropSpan;
+    use swc_ecma_visit::as_folder;
 
     fn mk_map(
         tester: &mut crate::tests::Tester<'_>,
@@ -111,7 +104,9 @@ mod tests {
 
             let mut v = tester
                 .apply_transform(
-                    ::testing::DropSpan,
+                    as_folder(DropSpan {
+                        preserve_ctxt: false,
+                    }),
                     "global.js",
                     ::swc_ecma_parser::Syntax::default(),
                     &v,

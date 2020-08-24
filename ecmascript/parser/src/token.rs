@@ -10,14 +10,11 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
 };
 use swc_atoms::{js_word, JsWord};
-#[cfg(feature = "fold")]
-use swc_common::Fold;
-use swc_common::SpanData;
+use swc_common::Span;
 pub(crate) use swc_ecma_ast::AssignOp as AssignOpToken;
 use swc_ecma_ast::BinaryOp;
 
-#[derive(Kind, Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "fold", derive(Fold))]
+#[derive(Kind, Clone, PartialEq)]
 #[kind(functions(starts_expr = "bool", before_expr = "bool"))]
 pub enum Token {
     /// Identifier, "null", "true", "false".
@@ -126,7 +123,7 @@ pub enum Token {
     Num(f64),
 
     #[kind(starts_expr)]
-    BigInt(#[cfg_attr(feature = "fold", fold(ignore))] BigIntValue),
+    BigInt(BigIntValue),
 
     JSXName {
         name: JsWord,
@@ -140,11 +137,10 @@ pub enum Token {
     JSXTagEnd,
 
     Shebang(JsWord),
-    Error(#[cfg_attr(feature = "fold", fold(ignore))] Error),
+    Error(Error),
 }
 
 #[derive(Kind, Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 #[kind(functions(starts_expr = "bool"))]
 pub enum BinOpToken {
     /// `==`
@@ -219,11 +215,10 @@ pub struct TokenAndSpan {
     pub token: Token,
     /// Had a line break before this token?
     pub had_line_break: bool,
-    pub span: SpanData,
+    pub span: Span,
 }
 
 #[derive(Kind, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 #[kind(functions(starts_expr = "bool", before_expr = "bool"))]
 pub enum Word {
     #[kind(delegate)]
@@ -371,7 +366,6 @@ impl Debug for Word {
 
 /// Keywords
 #[derive(Kind, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 #[kind(function(before_expr = "bool", starts_expr = "bool"))]
 pub enum Keyword {
     /// Spec says this might be identifier.
@@ -572,5 +566,53 @@ impl Word {
             Word::True => Cow::Owned(js_word!("true")),
             Word::Null => Cow::Owned(js_word!("null")),
         }
+    }
+}
+
+impl Debug for Token {
+    /// This method is called only in the case of parsing failure.
+    #[cold]
+    #[inline(never)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::Word(w) => write!(f, "{:?}", w)?,
+            Arrow => write!(f, "=>")?,
+            Hash => write!(f, "#")?,
+            At => write!(f, "@")?,
+            Dot => write!(f, ".")?,
+            DotDotDot => write!(f, "...")?,
+            Bang => write!(f, "!")?,
+            LParen => write!(f, "(")?,
+            RParen => write!(f, ")")?,
+            LBracket => write!(f, "[")?,
+            RBracket => write!(f, "]")?,
+            LBrace => write!(f, "{{")?,
+            RBrace => write!(f, "}}")?,
+            Semi => write!(f, ";")?,
+            Comma => write!(f, ",")?,
+            BackQuote => write!(f, "`")?,
+            Template { raw, .. } => write!(f, "template token ({})", raw)?,
+            Colon => write!(f, ":")?,
+            ColonColon => write!(f, "::")?,
+            BinOp(op) => write!(f, "{}", BinaryOp::from(*op).as_str())?,
+            AssignOp(op) => write!(f, "{}", op.as_str())?,
+            DollarLBrace => write!(f, "${{")?,
+            QuestionMark => write!(f, "?")?,
+            PlusPlus => write!(f, "++")?,
+            MinusMinus => write!(f, "--")?,
+            Tilde => write!(f, "~")?,
+            Str { value, .. } => write!(f, "string literal ({})", value)?,
+            Regex(exp, flags) => write!(f, "regexp literal ({}, {})", exp, flags)?,
+            Num(..) => write!(f, "numeric literal")?,
+            BigInt(..) => write!(f, "bigint literal")?,
+            JSXName { name } => write!(f, "jsx name ({})", name)?,
+            JSXText { raw } => write!(f, "jsx text ({})", raw)?,
+            JSXTagStart => write!(f, "< (jsx tag start)")?,
+            JSXTagEnd => write!(f, "> (jsx tag end)")?,
+            Shebang(_) => write!(f, "#!")?,
+            Token::Error(_) => write!(f, "<lexing error>")?,
+        }
+
+        Ok(())
     }
 }

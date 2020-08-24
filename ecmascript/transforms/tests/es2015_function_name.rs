@@ -1,17 +1,13 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 use swc_common::{chain, Mark};
 use swc_ecma_parser::Syntax;
 use swc_ecma_transforms::{
-    compat::es2015::{arrow, block_scoping, classes::Classes, function_name, Shorthand},
+    compat::es2015::{arrow, block_scoping, classes::classes, function_name, shorthand},
     modules::{amd::amd, common_js::common_js, umd::umd},
-    pass::Pass,
     proposals::decorators,
     resolver,
 };
+use swc_ecma_visit::Fold;
 
 #[macro_use]
 mod common;
@@ -20,7 +16,7 @@ fn syntax() -> Syntax {
     Default::default()
 }
 
-fn tr() -> impl Pass {
+fn tr() -> impl Fold {
     chain!(resolver(), function_name(), block_scoping())
 }
 
@@ -158,8 +154,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_function_collision,
@@ -224,7 +223,7 @@ test!(
     |tester| chain!(
         resolver(),
         function_name(),
-        Shorthand,
+        shorthand(),
         arrow(),
         umd(
             tester.cm.clone(),
@@ -279,8 +278,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_collisions,
@@ -337,8 +339,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
         common_js(Mark::fresh(Mark::root()), Default::default())
     ),
@@ -396,7 +401,7 @@ exports.default = Container;
 //test!(syntax(),|_| tr("{
 //  "plugins": [
 //    function_name(),
-//    Shorthand,
+//    shorthand(),
 //    arrow(),
 //    "transform-modules-systemjs"
 //  ]
@@ -460,8 +465,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_await,
@@ -486,8 +494,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_function_assignment,
@@ -544,8 +555,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_shorthand_property,
@@ -603,7 +617,12 @@ var f = function f({
 test!(
     ignore,
     syntax(),
-    |_| chain!(function_name(), Shorthand, arrow(), amd(Default::default())),
+    |_| chain!(
+        function_name(),
+        shorthand(),
+        arrow(),
+        amd(Default::default())
+    ),
     function_name_export_default_arrow_renaming_module_amd,
     r#"
 export default (a) => {
@@ -641,8 +660,11 @@ test!(
     |_| chain!(
         resolver(),
         function_name(),
-        Classes::default(),
-        decorators(decorators::Config { legacy: true })
+        classes(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        })
     ),
     function_name_object,
     r#"
@@ -699,8 +721,11 @@ test!(
     |_| chain!(
         resolver(),
         function_name(),
-        Classes::default(),
-        decorators(decorators::Config { legacy: true })
+        classes(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        })
     ),
     function_name_export,
     r#"
@@ -759,9 +784,12 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         function_name(),
-        Classes::default(),
+        classes(),
     ),
     function_name_global,
     r#"
@@ -827,8 +855,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
         common_js(Mark::fresh(Mark::root()), Default::default()),
     ),
@@ -878,8 +909,11 @@ test!(
     |_| chain!(
         resolver(),
         function_name(),
-        Classes::default(),
-        decorators(decorators::Config { legacy: true })
+        classes(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        })
     ),
     function_name_eval,
     r#"
@@ -906,8 +940,11 @@ test!(
     |_| chain!(
         resolver(),
         function_name(),
-        Classes::default(),
-        decorators(decorators::Config { legacy: true }),
+        classes(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         common_js(Mark::fresh(Mark::root()), Default::default())
     ),
     function_name_modules_3,
@@ -961,8 +998,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_basic,
@@ -986,7 +1026,7 @@ test!(
     syntax(),
     |_| chain!(
         arrow(),
-        Shorthand,
+        shorthand(),
         function_name(),
         common_js(Mark::fresh(Mark::root()), Default::default())
     ),
@@ -1120,9 +1160,12 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
         function_name(),
-        Classes::default()
+        classes()
     ),
     function_name_self_reference,
     r#"
@@ -1185,8 +1228,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_method_definition,
@@ -1210,8 +1256,11 @@ test!(
     syntax(),
     |_| chain!(
         resolver(),
-        decorators(decorators::Config { legacy: true }),
-        Classes::default(),
+        decorators(decorators::Config {
+            legacy: true,
+            ..Default::default()
+        }),
+        classes(),
         function_name(),
     ),
     function_name_own_bindings,
@@ -1253,7 +1302,7 @@ var obj = {
 test!(
     ignore,
     syntax(),
-    |_| chain!(arrow(), Shorthand, function_name()),
+    |_| chain!(arrow(), shorthand(), function_name()),
     function_name_export_default_arrow_renaming_module_es6,
     r#"
 export default (a) => {

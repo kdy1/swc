@@ -1,13 +1,13 @@
 //! 13.3.3 Destructuring Binding Patterns
 use super::{util::ExprExt, *};
-use crate::{make_span, parser::expr::PatOrExprOrSpread, token::AssignOpToken};
+use crate::{parser::expr::PatOrExprOrSpread, token::AssignOpToken};
 use std::iter;
 use swc_atoms::js_word;
 use swc_common::Spanned;
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
-    pub(super) fn parse_opt_binding_ident(&mut self) -> PResult<'a, Option<Ident>> {
+impl<'a, I: Tokens> Parser<I> {
+    pub(super) fn parse_opt_binding_ident(&mut self) -> PResult<Option<Ident>> {
         trace_cur!(parse_opt_binding_ident);
 
         if is!(BindingIdent) || (self.input.syntax().typescript() && is!("this")) {
@@ -20,7 +20,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     /// babel: `parseBindingIdentifier`
     ///
     /// spec: `BindingIdentifier`
-    pub(super) fn parse_binding_ident(&mut self) -> PResult<'a, Ident> {
+    pub(super) fn parse_binding_ident(&mut self) -> PResult<Ident> {
         trace_cur!(parse_binding_ident);
 
         // "yield" and "await" is **lexically** accepted.
@@ -38,7 +38,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(ident)
     }
 
-    pub(super) fn parse_binding_pat_or_ident(&mut self) -> PResult<'a, Pat> {
+    pub(super) fn parse_binding_pat_or_ident(&mut self) -> PResult<Pat> {
         trace_cur!(parse_binding_pat_or_ident);
 
         match *cur!(true)? {
@@ -51,12 +51,12 @@ impl<'a, I: Tokens> Parser<'a, I> {
             //     expect!(')');
             //     Ok(pat)
             // }
-            _ => unexpected!(),
+            _ => unexpected!("yield, an identifier, [ or {"),
         }
     }
 
     /// babel: `parseBindingAtom`
-    pub(super) fn parse_binding_element(&mut self) -> PResult<'a, Pat> {
+    pub(super) fn parse_binding_element(&mut self) -> PResult<Pat> {
         trace_cur!(parse_binding_element);
 
         let start = cur_pos!();
@@ -80,7 +80,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(left)
     }
 
-    fn parse_array_binding_pat(&mut self) -> PResult<'a, Pat> {
+    fn parse_array_binding_pat(&mut self) -> PResult<Pat> {
         let start = cur_pos!();
 
         assert_and_bump!('[');
@@ -130,7 +130,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }))
     }
 
-    pub(super) fn eat_any_ts_modifier(&mut self) -> PResult<'a, bool> {
+    pub(super) fn eat_any_ts_modifier(&mut self) -> PResult<bool> {
         let has_modifier = self.syntax().typescript()
             && match *cur!(false)? {
                 Word(Word::Ident(js_word!("public")))
@@ -150,7 +150,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     /// spec: 'FormalParameter'
     ///
     /// babel: `parseAssignableListItem`
-    pub(super) fn parse_formal_param_pat(&mut self) -> PResult<'a, Pat> {
+    pub(super) fn parse_formal_param_pat(&mut self) -> PResult<Pat> {
         let start = cur_pos!();
 
         let has_modifier = self.eat_any_ts_modifier()?;
@@ -177,7 +177,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                     _ if self.input.syntax().dts() || self.ctx().in_declare => {}
                     _ => {
                         syntax_error!(
-                            make_span(self.input.prev_span()),
+                            self.input.prev_span(),
                             SyntaxError::TsBindingPatCannotBeOptional
                         );
                     }
@@ -250,7 +250,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(pat)
     }
 
-    pub(super) fn parse_constructor_params(&mut self) -> PResult<'a, Vec<ParamOrTsParamProp>> {
+    pub(super) fn parse_constructor_params(&mut self) -> PResult<Vec<ParamOrTsParamProp>> {
         let mut first = true;
         let mut params = vec![];
 
@@ -304,7 +304,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         &mut self,
         param_start: BytePos,
         decorators: Vec<Decorator>,
-    ) -> PResult<'a, ParamOrTsParamProp> {
+    ) -> PResult<ParamOrTsParamProp> {
         let (accessibility, readonly) = if self.input.syntax().typescript() {
             let accessibility = self.parse_access_modifier()?;
             (
@@ -337,7 +337,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         }
     }
 
-    pub(super) fn parse_formal_params(&mut self) -> PResult<'a, Vec<Param>> {
+    pub(super) fn parse_formal_params(&mut self) -> PResult<Vec<Param>> {
         let mut first = true;
         let mut params = vec![];
         let mut dot3_token = Span::default();
@@ -402,7 +402,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                 });
 
                 if self.syntax().typescript() && eat!('?') {
-                    self.emit_err(make_span(self.input.prev_span()), SyntaxError::TS1047);
+                    self.emit_err(self.input.prev_span(), SyntaxError::TS1047);
                     //
                 }
 
@@ -421,7 +421,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         Ok(params)
     }
 
-    pub(super) fn parse_unique_formal_params(&mut self) -> PResult<'a, Vec<Param>> {
+    pub(super) fn parse_unique_formal_params(&mut self) -> PResult<Vec<Param>> {
         // FIXME: This is wrong
         self.parse_formal_params()
     }
@@ -445,14 +445,10 @@ impl PatType {
 }
 
 #[parser]
-impl<'a, I: Tokens> Parser<'a, I> {
+impl<'a, I: Tokens> Parser<I> {
     /// This does not return 'rest' pattern because non-last parameter cannot be
     /// rest.
-    pub(super) fn reparse_expr_as_pat(
-        &mut self,
-        pat_ty: PatType,
-        expr: Box<Expr>,
-    ) -> PResult<'a, Pat> {
+    pub(super) fn reparse_expr_as_pat(&mut self, pat_ty: PatType, expr: Box<Expr>) -> PResult<Pat> {
         if let Expr::Invalid(i) = *expr {
             return Ok(Pat::Invalid(i));
         }
@@ -479,7 +475,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
         &mut self,
         pat_ty: PatType,
         expr: Box<Expr>,
-    ) -> PResult<'a, Pat> {
+    ) -> PResult<Pat> {
         // In dts, we do not reparse.
         debug_assert!(!self.input.syntax().dts());
 
@@ -500,8 +496,8 @@ impl<'a, I: Tokens> Parser<'a, I> {
                     // Expression derives a phrase that would produce a Syntax Error according
                     // to these rules if that phrase were substituted for
                     // LeftHandSideExpression. This rule is recursively applied.
-                    Expr::Paren(ParenExpr { expr, .. }) => {
-                        return self.reparse_expr_as_pat_inner(pat_ty, expr);
+                    Expr::Paren(..) => {
+                        return Ok(Pat::Expr(expr));
                     }
                     Expr::Ident(i) => return Ok(i.into()),
                     _ => {
@@ -621,7 +617,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
                                 }
                             }
                         })
-                        .collect::<PResult<'a, _>>()?,
+                        .collect::<PResult<_>>()?,
                     optional: false,
                     type_ann: None,
                 }))
@@ -735,7 +731,7 @@ impl<'a, I: Tokens> Parser<'a, I> {
     pub(super) fn parse_paren_items_as_params(
         &mut self,
         mut exprs: Vec<PatOrExprOrSpread>,
-    ) -> PResult<'a, Vec<Pat>> {
+    ) -> PResult<Vec<Pat>> {
         let pat_ty = PatType::BindingPat;
 
         let len = exprs.len();
@@ -795,13 +791,10 @@ impl<'a, I: Tokens> Parser<'a, I> {
 mod tests {
     use super::*;
     use swc_common::DUMMY_SP as span;
+    use swc_ecma_visit::assert_eq_ignore_span;
 
     fn array_pat(s: &'static str) -> Pat {
-        test_parser(s, Syntax::default(), |p| {
-            p.parse_array_binding_pat().map_err(|mut e| {
-                e.emit();
-            })
-        })
+        test_parser(s, Syntax::default(), |p| p.parse_array_binding_pat())
     }
 
     fn ident(s: &str) -> Ident {
@@ -810,7 +803,7 @@ mod tests {
 
     #[test]
     fn array_pat_simple() {
-        testing::assert_eq_ignore_span!(
+        assert_eq_ignore_span!(
             array_pat("[a, [b], [c]]"),
             Pat::Array(ArrayPat {
                 span,
@@ -837,7 +830,7 @@ mod tests {
 
     #[test]
     fn array_pat_empty_start() {
-        testing::assert_eq_ignore_span!(
+        assert_eq_ignore_span!(
             array_pat("[, a, [b], [c]]"),
             Pat::Array(ArrayPat {
                 span,
@@ -865,7 +858,7 @@ mod tests {
 
     #[test]
     fn array_pat_empty() {
-        testing::assert_eq_ignore_span!(
+        assert_eq_ignore_span!(
             array_pat("[a, , [b], [c]]"),
             Pat::Array(ArrayPat {
                 span,

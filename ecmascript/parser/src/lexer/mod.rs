@@ -1,9 +1,5 @@
 //! ECMAScript lexer.
-//!
-//! In future, this might use string directly.
 
-#![allow(unused_mut)]
-#![allow(unused_variables)]
 pub use self::{
     input::Input,
     state::{TokenContext, TokenContexts},
@@ -12,11 +8,11 @@ use self::{state::State, util::*};
 use crate::{
     error::{Error, SyntaxError},
     token::*,
-    Context, JscTarget, Session, Syntax,
+    Context, JscTarget, Syntax,
 };
 use either::Either::{Left, Right};
 use smallvec::{smallvec, SmallVec};
-use std::{char, iter::FusedIterator, mem::take};
+use std::{cell::RefCell, char, iter::FusedIterator, mem::take, rc::Rc};
 use swc_atoms::{js_word, JsWord};
 use swc_common::{
     comments::{Comment, Comments},
@@ -95,14 +91,23 @@ impl FusedIterator for CharIter {}
 
 #[derive(Clone)]
 pub struct Lexer<'a, I: Input> {
-    session: Session<'a>,
-    comments: Option<&'a Comments>,
-    leading_comments_buffer: Option<Vec<Comment>>,
+    comments: Option<&'a dyn Comments>,
+    /// [Some] if comment comment parsing is enabled. Otherwise [None]
+    leading_comments_buffer: Option<Rc<RefCell<Vec<Comment>>>>,
+
     pub(crate) ctx: Context,
     input: I,
+    /// Stores last position of the last comment.
+    ///
+    /// [Rc] and [RefCell] is used because this value should always increment,
+    /// even if backtracking fails.
+    last_comment_pos: Rc<RefCell<BytePos>>,
+
     state: State,
     pub(crate) syntax: Syntax,
     pub(crate) target: JscTarget,
+
+    errors: Rc<RefCell<Vec<Error>>>,
 
     buf: String,
 }
@@ -111,14 +116,12 @@ impl<I: Input> FusedIterator for Lexer<'_, I> {}
 
 impl<'a, I: Input> Lexer<'a, I> {
     pub fn new(
-        session: Session<'a>,
         syntax: Syntax,
         target: JscTarget,
         input: I,
-        comments: Option<&'a Comments>,
+        comments: Option<&'a dyn Comments>,
     ) -> Self {
         Lexer {
-            session,
             leading_comments_buffer: if comments.is_some() {
                 Some(Default::default())
             } else {
@@ -126,10 +129,12 @@ impl<'a, I: Input> Lexer<'a, I> {
             },
             comments,
             input,
+            last_comment_pos: Rc::new(RefCell::new(BytePos(0))),
             state: State::new(syntax),
             ctx: Default::default(),
             syntax,
             target,
+            errors: Default::default(),
             buf: String::with_capacity(16),
         }
     }
@@ -219,6 +224,10 @@ impl<'a, I: Input> Lexer<'a, I> {
                 Some('?') => {
                     self.input.bump();
                     self.input.bump();
+                    if self.syntax.typescript() && self.input.cur() == Some('=') {
+                        self.input.bump();
+                        return Ok(Some(tok!("??=")));
+                    }
                     return Ok(Some(tok!("??")));
                 }
                 _ => {
@@ -325,6 +334,16 @@ impl<'a, I: Input> Lexer<'a, I> {
                 // '||', '&&'
                 if self.input.cur() == Some(c) {
                     self.input.bump();
+
+                    if self.syntax.typescript() && self.input.cur() == Some('=') {
+                        self.input.bump();
+                        return Ok(Some(AssignOp(match token {
+                            BitAnd => AndAssign,
+                            BitOr => OrAssign,
+                            _ => unreachable!(),
+                        })));
+                    }
+
                     return Ok(Some(BinOp(match token {
                         BitAnd => LogicalAnd,
                         BitOr => LogicalOr,
@@ -463,7 +482,7 @@ impl<'a, I: Input> Lexer<'a, I> {
     /// Read an escaped charater for string literal.
     ///
     /// In template literal, we should preserve raw string.
-    fn read_escaped_char(&mut self, mut raw: &mut Raw) -> LexResult<Option<Char>> {
+    fn read_escaped_char(&mut self, raw: &mut Raw) -> LexResult<Option<Char>> {
         debug_assert_eq!(self.cur(), Some('\\'));
         let start = self.cur_pos();
         self.bump(); // '\'
@@ -491,20 +510,20 @@ impl<'a, I: Input> Lexer<'a, I> {
             'v' => push_c_and_ret!('\u{000b}'),
             'f' => push_c_and_ret!('\u{000c}'),
             '\r' => {
-                raw.push_str("\\r");
+                raw.push_str("\r");
                 self.bump(); // remove '\r'
 
                 if self.cur() == Some('\n') {
-                    raw.push_str("\\n");
+                    raw.push_str("\n");
                     self.bump();
                 }
                 return Ok(None);
             }
             '\n' | '\u{2028}' | '\u{2029}' => {
                 match c {
-                    '\n' => raw.push_str("\\n"),
-                    '\u{2028}' => raw.push_str("\\u{2028}"),
-                    '\u{2029}' => raw.push_str("\\u{2029}"),
+                    '\n' => raw.push_str("\n"),
+                    '\u{2028}' => raw.push_str("\u{2028}"),
+                    '\u{2029}' => raw.push_str("\u{2029}"),
                     _ => unreachable!(),
                 }
                 self.bump();
@@ -524,6 +543,7 @@ impl<'a, I: Input> Lexer<'a, I> {
             }
             // octal escape sequences
             '0'..='7' => {
+                raw.push(c);
                 self.bump();
                 let first_c = if c == '0' {
                     match self.cur() {
@@ -585,7 +605,7 @@ impl<'a, I: Input> Lexer<'a, I> {
 impl<'a, I: Input> Lexer<'a, I> {
     fn read_slash(&mut self) -> LexResult<Option<Token>> {
         debug_assert_eq!(self.cur(), Some('/'));
-        let start = self.cur_pos();
+        // let start = self.cur_pos();
 
         // Regex
         if self.state.is_expr_allowed {
@@ -756,7 +776,7 @@ impl<'a, I: Input> Lexer<'a, I> {
 
         if self.eat('{') {
             raw.push('{');
-            let cp_start = self.cur_pos();
+            // let cp_start = self.cur_pos();
             let c = self.read_code_point(raw)?;
 
             if !self.eat('}') {
@@ -774,10 +794,10 @@ impl<'a, I: Input> Lexer<'a, I> {
     ///
     /// THis method returns [Char] as non-utf8 character is valid in javsacript.
     /// See https://github.com/swc-project/swc/issues/261
-    fn read_hex_char(&mut self, start: BytePos, count: u8, mut raw: &mut Raw) -> LexResult<Char> {
+    fn read_hex_char(&mut self, start: BytePos, count: u8, raw: &mut Raw) -> LexResult<Char> {
         debug_assert!(count == 2 || count == 4);
 
-        let pos = self.cur_pos();
+        // let pos = self.cur_pos();
         match self.read_int_u32(16, count, raw)? {
             Some(val) => Ok(val.into()),
             None => self.error(start, SyntaxError::ExpectedHexChars { count })?,
@@ -785,7 +805,7 @@ impl<'a, I: Input> Lexer<'a, I> {
     }
 
     /// Read `CodePoint`.
-    fn read_code_point(&mut self, mut raw: &mut Raw) -> LexResult<Char> {
+    fn read_code_point(&mut self, raw: &mut Raw) -> LexResult<Char> {
         let start = self.cur_pos();
         let val = self.read_int_u32(16, 0, raw)?;
         match val {
@@ -850,7 +870,7 @@ impl<'a, I: Input> Lexer<'a, I> {
         self.bump();
 
         let (mut escaped, mut in_class) = (false, false);
-        let content_start = self.cur_pos();
+        // let content_start = self.cur_pos();
         let content = self.with_buf(|l, buf| {
             while let Some(c) = l.cur() {
                 // This is ported from babel.
@@ -877,7 +897,8 @@ impl<'a, I: Input> Lexer<'a, I> {
 
             Ok((&**buf).into())
         })?;
-        let content_span = Span::new(content_start, self.cur_pos(), Default::default());
+        // let content_span = Span::new(content_start, self.cur_pos(),
+        // Default::default());
 
         // input is terminated without following `/`
         if !self.is('/') {
@@ -891,7 +912,7 @@ impl<'a, I: Input> Lexer<'a, I> {
 
         // Need to use `read_word` because '\uXXXX' sequences are allowed
         // here (don't ask).
-        let flags_start = self.cur_pos();
+        // let flags_start = self.cur_pos();
         let flags = self
             .may_read_word_as_str()?
             .map(|(value, _)| value)

@@ -1,6 +1,7 @@
 use crate::util::ExprFactory;
-use swc_common::{Fold, FoldWith, Visit, VisitWith};
+use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
+use swc_ecma_visit::{noop_fold_type, Fold, FoldWith, Node, Visit, VisitWith};
 
 /// `@babel/plugin-transform-instanceof`
 ///
@@ -27,26 +28,30 @@ use swc_ecma_ast::*;
 ///
 /// _instanceof(foo, Bar);
 /// ```
-#[derive(Clone)]
-pub struct InstanceOf;
+pub fn instance_of() -> impl Fold {
+    InstanceOf
+}
+struct InstanceOf;
 
-noop_fold_type!(InstanceOf);
+impl Fold for InstanceOf {
+    noop_fold_type!();
 
-impl Fold<Expr> for InstanceOf {
-    fn fold(&mut self, expr: Expr) -> Expr {
+    fn fold_expr(&mut self, expr: Expr) -> Expr {
         fn should_work(node: &Expr) -> bool {
             struct Visitor {
                 found: bool,
             }
-            impl Visit<BinExpr> for Visitor {
-                fn visit(&mut self, e: &BinExpr) {
+            impl Visit for Visitor {
+                noop_visit_type!();
+
+                fn visit_bin_expr(&mut self, e: &BinExpr, _: &dyn Node) {
                     if e.op == op!("instanceof") {
                         self.found = true
                     }
                 }
             }
             let mut v = Visitor { found: false };
-            node.visit_with(&mut v);
+            node.visit_with(&Invalid { span: DUMMY_SP } as _, &mut v);
             v.found
         }
         // fast path
@@ -54,7 +59,7 @@ impl Fold<Expr> for InstanceOf {
             return expr;
         }
 
-        let expr = expr.fold_children(self);
+        let expr = expr.fold_children_with(self);
 
         match expr {
             Expr::Bin(BinExpr {

@@ -1,10 +1,4 @@
-error: TS1005
- --> $DIR/tests/test262-parser/fail/c91a41d48af2ef00.js:1:6
-  |
-1 | var a.b;
-  |      ^
-
-error: Unexpected token Some(Dot)
+error: Expected a semicolon
  --> $DIR/tests/test262-parser/fail/c91a41d48af2ef00.js:1:6
   |
 1 | var a.b;

@@ -1,10 +1,6 @@
 //! Copied from PeepholeIntegrationTest from the google closure compiler.
 
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
 use swc_common::chain;
 use swc_ecma_transforms::{optimization::simplifier, resolver};
 
@@ -305,6 +301,7 @@ fn test_bug_issue3() {
         "  if(sections.length != 1) children[i] = 0;",
         "  else var selectedid = children[i]",
         "}",
+        "foo()"
     ));
 }
 

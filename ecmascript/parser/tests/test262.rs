@@ -1,23 +1,24 @@
-#![feature(box_syntax)]
-#![feature(box_patterns)]
-#![feature(specialization)]
 #![feature(test)]
 
 extern crate test;
 
+use common::Normalizer;
 use std::{
     env,
     fs::{read_dir, File},
     io::{self, Read},
     path::Path,
 };
-use swc_common::{Fold, FoldWith, Span};
 use swc_ecma_ast::*;
-use swc_ecma_parser::{lexer::Lexer, PResult, Parser, Session, SourceFileInput, Syntax};
+use swc_ecma_parser::{lexer::Lexer, PResult, Parser, StringInput, Syntax};
+use swc_ecma_visit::FoldWith;
 use test::{
     test_main, DynTestFn, Options, ShouldPanic::No, TestDesc, TestDescAndFn, TestName, TestType,
 };
 use testing::{NormalizedOutput, StdErr};
+
+#[path = "common/mod.rs"]
+mod common;
 
 const IGNORED_PASS_TESTS: &[&str] = &[
     // Temporalily ignored
@@ -93,7 +94,7 @@ fn add_test<F: FnOnce() + Send + 'static>(
             should_panic: No,
             allow_fail: false,
         },
-        testfn: DynTestFn(box f),
+        testfn: DynTestFn(Box::new(f)),
     });
 }
 
@@ -121,6 +122,8 @@ fn error_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
         "78c215fabdf13bae.js",
         "bf49ec8d96884562.js",
         "e4a43066905a597b.js",
+        "98204d734f8c72b3.js",
+        "ef81b93cf9bdb4ec.js",
     ];
 
     let root = {
@@ -271,7 +274,10 @@ fn identity_tests(tests: &mut Vec<TestDescAndFn>) -> Result<(), io::Error> {
                             err, json
                         )
                     })
-                    .fold_with(&mut Normalizer);
+                    .fold_with(&mut Normalizer {
+                        drop_span: true,
+                        is_test262: true,
+                    });
                 assert_eq!(src, deser, "JSON:\n{}", json);
             } else {
                 let p = |explicit| {
@@ -302,22 +308,20 @@ fn parse_module<'a>(file_name: &Path) -> Result<Module, NormalizedOutput> {
 
 fn with_parser<F, Ret>(file_name: &Path, f: F) -> Result<Ret, StdErr>
 where
-    F: for<'a> FnOnce(&mut Parser<'a, Lexer<'a, SourceFileInput<'_>>>) -> PResult<'a, Ret>,
+    F: FnOnce(&mut Parser<Lexer<StringInput<'_>>>) -> PResult<Ret>,
 {
     let output = ::testing::run_test(false, |cm, handler| {
         let fm = cm
             .load_file(file_name)
             .unwrap_or_else(|e| panic!("failed to load {}: {}", file_name.display(), e));
 
-        let res = f(&mut Parser::new(
-            Session { handler: &handler },
-            Syntax::default(),
-            (&*fm).into(),
-            None,
-        ))
-        .map_err(|mut e| {
-            e.emit();
-        });
+        let mut p = Parser::new(Syntax::default(), (&*fm).into(), None);
+
+        let res = f(&mut p).map_err(|e| e.into_diagnostic(handler).emit());
+
+        for e in p.take_errors() {
+            e.into_diagnostic(&handler).emit();
+        }
 
         if handler.has_errors() {
             return Err(());
@@ -347,88 +351,11 @@ fn error() {
 
 pub fn normalize<T>(t: T) -> T
 where
-    Normalizer: Fold<T>,
+    T: FoldWith<Normalizer>,
 {
-    let mut n = Normalizer;
-    n.fold(t)
-}
-
-pub struct Normalizer;
-impl Fold<Span> for Normalizer {
-    fn fold(&mut self, _: Span) -> Span {
-        Span::default()
-    }
-}
-impl Fold<Str> for Normalizer {
-    fn fold(&mut self, s: Str) -> Str {
-        Str {
-            span: Default::default(),
-            has_escape: false,
-            ..s
-        }
-    }
-}
-impl Fold<Expr> for Normalizer {
-    fn fold(&mut self, e: Expr) -> Expr {
-        let e = e.fold_children(self);
-
-        match e {
-            Expr::Paren(ParenExpr { expr, .. }) => *expr,
-            Expr::New(n @ NewExpr { args: None, .. }) => Expr::New(NewExpr {
-                args: Some(vec![]),
-                ..n
-            }),
-            // Flatten comma expressions.
-            Expr::Seq(SeqExpr { mut exprs, span }) => {
-                let need_work = exprs.iter().any(|n| match **n {
-                    Expr::Seq(..) => true,
-                    _ => false,
-                });
-
-                if need_work {
-                    exprs = exprs.into_iter().fold(vec![], |mut v, e| {
-                        match *e {
-                            Expr::Seq(SeqExpr { exprs, .. }) => v.extend(exprs),
-                            _ => v.push(e),
-                        }
-                        v
-                    });
-                }
-                Expr::Seq(SeqExpr { exprs, span })
-            }
-            _ => e,
-        }
-    }
-}
-
-impl Fold<PropName> for Normalizer {
-    fn fold(&mut self, n: PropName) -> PropName {
-        let n = n.fold_children(self);
-
-        match n {
-            PropName::Ident(Ident { sym, .. }) => PropName::Str(Str {
-                span: Default::default(),
-                value: sym,
-                has_escape: false,
-            }),
-            PropName::Num(num) => PropName::Str(Str {
-                span: Default::default(),
-                value: num.to_string().into(),
-                has_escape: false,
-            }),
-            _ => n,
-        }
-    }
-}
-
-impl Fold<PatOrExpr> for Normalizer {
-    fn fold(&mut self, node: PatOrExpr) -> PatOrExpr {
-        let node = node.fold_children(self);
-
-        match node {
-            PatOrExpr::Pat(box Pat::Expr(e)) => PatOrExpr::Expr(e),
-            PatOrExpr::Expr(box Expr::Ident(i)) => PatOrExpr::Pat(box Pat::Ident(i)),
-            _ => node,
-        }
-    }
+    let mut n = Normalizer {
+        drop_span: true,
+        is_test262: true,
+    };
+    t.fold_with(&mut n)
 }

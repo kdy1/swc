@@ -8,10 +8,10 @@ use crate::{
         Accessibility, TsExprWithTypeArgs, TsIndexSignature, TsTypeAnn, TsTypeParamDecl,
         TsTypeParamInstantiation,
     },
+    EmptyStmt,
 };
+use is_macro::Is;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "fold")]
-use swc_common::Fold;
 use swc_common::{ast_node, Span};
 
 #[ast_node]
@@ -43,7 +43,7 @@ pub struct Class {
 }
 
 #[ast_node]
-#[derive(Eq, Hash)]
+#[derive(Eq, Hash, Is)]
 pub enum ClassMember {
     #[tag("Constructor")]
     Constructor(Constructor),
@@ -59,55 +59,94 @@ pub enum ClassMember {
     PrivateProp(PrivateProp),
     #[tag("TsIndexSignature")]
     TsIndexSignature(TsIndexSignature),
+    #[tag("EmptyStatement")]
+    Empty(EmptyStmt),
 }
 
-macro_rules! property {
-    ($name:ident, $ty:literal, $KEY:ty) => {
-        #[ast_node($ty)]
-        #[derive(Eq, Hash)]
-        pub struct $name {
-            #[serde(default)]
-            pub span: Span,
+#[ast_node("ClassProperty")]
+#[derive(Eq, Hash)]
+pub struct ClassProp {
+    #[serde(default)]
+    pub span: Span,
 
-            pub key: $KEY,
+    pub key: Box<Expr>,
 
-            #[serde(default)]
-            pub value: Option<Box<Expr>>,
+    #[serde(default)]
+    pub value: Option<Box<Expr>>,
 
-            #[serde(default, rename = "typeAnnotation")]
-            pub type_ann: Option<TsTypeAnn>,
+    #[serde(default, rename = "typeAnnotation")]
+    pub type_ann: Option<TsTypeAnn>,
 
-            #[serde(default)]
-            pub is_static: bool,
+    #[serde(default)]
+    pub is_static: bool,
 
-            #[serde(default)]
-            pub decorators: Vec<Decorator>,
+    #[serde(default)]
+    pub decorators: Vec<Decorator>,
 
-            #[serde(default)]
-            pub computed: bool,
+    #[serde(default)]
+    pub computed: bool,
 
-            /// Typescript extension.
-            #[serde(default)]
-            pub accessibility: Option<Accessibility>,
+    /// Typescript extension.
+    #[serde(default)]
+    pub accessibility: Option<Accessibility>,
 
-            /// Typescript extension.
-            #[serde(default)]
-            pub is_abstract: bool,
+    /// Typescript extension.
+    #[serde(default)]
+    pub is_abstract: bool,
 
-            #[serde(default)]
-            pub is_optional: bool,
+    #[serde(default)]
+    pub is_optional: bool,
 
-            #[serde(default)]
-            pub readonly: bool,
+    #[serde(default)]
+    pub readonly: bool,
 
-            #[serde(default)]
-            pub definite: bool,
-        }
-    };
+    #[serde(default)]
+    pub declare: bool,
+
+    #[serde(default)]
+    pub definite: bool,
 }
 
-property!(ClassProp, "ClassProperty", Box<Expr>);
-property!(PrivateProp, "PrivateProperty", PrivateName);
+#[ast_node("PrivateProperty")]
+#[derive(Eq, Hash)]
+pub struct PrivateProp {
+    #[serde(default)]
+    pub span: Span,
+
+    pub key: PrivateName,
+
+    #[serde(default)]
+    pub value: Option<Box<Expr>>,
+
+    #[serde(default, rename = "typeAnnotation")]
+    pub type_ann: Option<TsTypeAnn>,
+
+    #[serde(default)]
+    pub is_static: bool,
+
+    #[serde(default)]
+    pub decorators: Vec<Decorator>,
+
+    #[serde(default)]
+    pub computed: bool,
+
+    /// Typescript extension.
+    #[serde(default)]
+    pub accessibility: Option<Accessibility>,
+
+    /// Typescript extension.
+    #[serde(default)]
+    pub is_abstract: bool,
+
+    #[serde(default)]
+    pub is_optional: bool,
+
+    #[serde(default)]
+    pub readonly: bool,
+
+    #[serde(default)]
+    pub definite: bool,
+}
 
 macro_rules! method {
     ($name:ident, $ty:literal, $KEY:ty) => {
@@ -121,7 +160,6 @@ macro_rules! method {
 
             pub function: Function,
 
-            #[cfg_attr(feature = "fold", fold(ignore))]
             pub kind: MethodKind,
 
             #[serde(default)]
@@ -173,7 +211,6 @@ pub struct Decorator {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "fold", derive(Fold))]
 pub enum MethodKind {
     #[serde(rename = "method")]
     Method,

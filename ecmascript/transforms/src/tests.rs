@@ -1,7 +1,4 @@
-use crate::{
-    helpers::{InjectHelpers, HELPERS},
-    pass::Pass,
-};
+use crate::helpers::{inject_helpers, HELPERS};
 use std::{
     fmt,
     fs::{create_dir_all, remove_dir_all, OpenOptions},
@@ -10,20 +7,20 @@ use std::{
     process::Command,
     sync::{Arc, RwLock},
 };
-use swc_common::{comments::Comments, errors::Handler, FileName, Fold, FoldWith, SourceMap};
-use swc_ecma_ast::*;
+use swc_common::{
+    comments::SingleThreadedComments, errors::Handler, sync::Lrc, FileName, SourceMap,
+};
+use swc_ecma_ast::{Pat, *};
 use swc_ecma_codegen::Emitter;
-use swc_ecma_parser::{lexer::Lexer, Parser, Session, SourceFileInput, Syntax};
+use swc_ecma_parser::{error::Error, lexer::Lexer, Parser, StringInput, Syntax};
+use swc_ecma_utils::DropSpan;
+use swc_ecma_visit::{as_folder, Fold, FoldWith};
 use tempfile::tempdir_in;
 
-struct MyHandlers;
-
-impl swc_ecma_codegen::Handlers for MyHandlers {}
-
 pub(crate) struct Tester<'a> {
-    pub cm: Arc<SourceMap>,
+    pub cm: Lrc<SourceMap>,
     pub handler: &'a Handler,
-    pub comments: Comments,
+    pub comments: SingleThreadedComments,
 }
 
 impl<'a> Tester<'a> {
@@ -37,7 +34,7 @@ impl<'a> Tester<'a> {
                     op(&mut Tester {
                         cm,
                         handler,
-                        comments: Comments::default(),
+                        comments: Default::default(),
                     })
                 })
             })
@@ -57,40 +54,29 @@ impl<'a> Tester<'a> {
         op: F,
     ) -> Result<T, ()>
     where
-        F: FnOnce(&mut Parser<'_, Lexer<'_, SourceFileInput<'_>>>) -> Result<T, ()>,
+        F: FnOnce(&mut Parser<Lexer<StringInput>>) -> Result<T, Error>,
     {
         let fm = self
             .cm
             .new_source_file(FileName::Real(file_name.into()), src.into());
 
-        let sess = Session {
-            handler: &self.handler,
-        };
+        let mut p = Parser::new(syntax, StringInput::from(&*fm), Some(&self.comments));
+        let res = op(&mut p).map_err(|e| e.into_diagnostic(&self.handler).emit());
 
-        let mut p = Parser::new(
-            sess,
-            syntax,
-            SourceFileInput::from(&*fm),
-            Some(&self.comments),
-        );
-        op(&mut p)
+        for e in p.take_errors() {
+            e.into_diagnostic(&self.handler).emit()
+        }
+
+        res
     }
 
     pub fn parse_module(&mut self, file_name: &str, src: &str) -> Result<Module, ()> {
-        self.with_parser(file_name, Syntax::default(), src, |p| {
-            p.parse_module().map_err(|mut e| {
-                e.emit();
-            })
-        })
+        self.with_parser(file_name, Syntax::default(), src, |p| p.parse_module())
     }
 
     pub fn parse_stmts(&mut self, file_name: &str, src: &str) -> Result<Vec<Stmt>, ()> {
         let stmts = self.with_parser(file_name, Syntax::default(), src, |p| {
-            p.parse_script()
-                .map_err(|mut e| {
-                    e.emit();
-                })
-                .map(|script| script.body)
+            p.parse_script().map(|script| script.body)
         })?;
 
         Ok(stmts)
@@ -103,7 +89,7 @@ impl<'a> Tester<'a> {
         Ok(stmts.pop().unwrap())
     }
 
-    pub fn apply_transform<T: Fold<Module>>(
+    pub fn apply_transform<T: Fold>(
         &mut self,
         mut tr: T,
         name: &str,
@@ -115,40 +101,41 @@ impl<'a> Tester<'a> {
             .new_source_file(FileName::Real(name.into()), src.into());
 
         let module = {
-            let sess = Session {
-                handler: &self.handler,
-            };
+            let mut p = Parser::new(syntax, StringInput::from(&*fm), None);
+            let res = p
+                .parse_module()
+                .map_err(|e| e.into_diagnostic(&self.handler).emit());
 
-            let mut p = Parser::new(sess, syntax, SourceFileInput::from(&*fm), None);
-            p.parse_module().map_err(|mut e| {
-                e.emit();
-            })?
+            for e in p.take_errors() {
+                e.into_diagnostic(&self.handler).emit()
+            }
+
+            res?
         };
 
         let module = validate!(module)
             .fold_with(&mut tr)
-            .fold_with(&mut ::testing::DropSpan)
+            .fold_with(&mut as_folder(DropSpan {
+                preserve_ctxt: true,
+            }))
             .fold_with(&mut Normalizer);
 
         Ok(module)
     }
 
     pub fn print(&mut self, module: &Module) -> String {
-        let handlers = box MyHandlers;
-
         let mut wr = Buf(Arc::new(RwLock::new(vec![])));
         {
             let mut emitter = Emitter {
                 cfg: Default::default(),
                 cm: self.cm.clone(),
-                wr: box swc_ecma_codegen::text_writer::JsWriter::new(
+                wr: Box::new(swc_ecma_codegen::text_writer::JsWriter::new(
                     self.cm.clone(),
                     "\n",
                     &mut wr,
                     None,
-                ),
+                )),
                 comments: None,
-                handlers,
             };
 
             // println!("Emitting: {:?}", module);
@@ -161,10 +148,10 @@ impl<'a> Tester<'a> {
     }
 }
 
-fn make_tr<F, P>(_: &'static str, op: F, tester: &mut Tester<'_>) -> impl Pass
+fn make_tr<F, P>(_: &'static str, op: F, tester: &mut Tester<'_>) -> impl Fold
 where
     F: FnOnce(&mut Tester<'_>) -> P,
-    P: Pass,
+    P: Fold,
 {
     op(tester)
 }
@@ -188,10 +175,17 @@ pub(crate) fn test_transform<F, P>(
     ok_if_code_eq: bool,
 ) where
     F: FnOnce(&mut Tester<'_>) -> P,
+    P: Fold,
 {
     crate::tests::Tester::run(|tester| {
-        let expected =
-            tester.apply_transform(::testing::DropSpan, "output.js", syntax, expected)?;
+        let expected = tester.apply_transform(
+            as_folder(::swc_ecma_utils::DropSpan {
+                preserve_ctxt: true,
+            }),
+            "output.js",
+            syntax,
+            expected,
+        )?;
 
         println!("----- Actual -----");
 
@@ -210,7 +204,7 @@ pub(crate) fn test_transform<F, P>(
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-1" })
             .fold_with(&mut crate::hygiene::hygiene())
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-2" })
-            .fold_with(&mut crate::fixer::fixer())
+            .fold_with(&mut crate::fixer::fixer(None))
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-3" });
 
         if actual == expected {
@@ -286,6 +280,7 @@ macro_rules! exec_tr {
 pub(crate) fn exec_tr<F, P>(test_name: &'static str, syntax: Syntax, tr: F, input: &str)
 where
     F: FnOnce(&mut Tester<'_>) -> P,
+    P: Fold,
 {
     Tester::run(|tester| {
         let tr = make_tr(test_name, tr, tester);
@@ -309,15 +304,15 @@ where
             _ => {}
         }
 
-        let module = module
+        let mut module = module
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-1" })
             .fold_with(&mut crate::hygiene::hygiene())
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-2" })
-            .fold_with(&mut crate::fixer::fixer())
+            .fold_with(&mut crate::fixer::fixer(None))
             .fold_with(&mut crate::debug::validator::Validator { name: "actual-3" });
 
         let src_without_helpers = tester.print(&module);
-        let module = module.fold_with(&mut InjectHelpers {});
+        module = module.fold_with(&mut inject_helpers());
 
         let src = tester.print(&module);
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -397,18 +392,22 @@ impl Write for Buf {
 }
 
 struct Normalizer;
-impl Fold<PatOrExpr> for Normalizer {
-    fn fold(&mut self, n: PatOrExpr) -> PatOrExpr {
-        match n {
-            PatOrExpr::Pat(box Pat::Expr(e)) => PatOrExpr::Expr(e),
-            _ => n,
+impl Fold for Normalizer {
+    fn fold_pat_or_expr(&mut self, mut n: PatOrExpr) -> PatOrExpr {
+        if let PatOrExpr::Pat(pat) = n {
+            if let Pat::Expr(expr) = *pat {
+                return PatOrExpr::Expr(expr);
+            }
+            n = PatOrExpr::Pat(pat);
         }
+
+        n
     }
 }
 
 pub(crate) struct HygieneVisualizer;
-impl Fold<Ident> for HygieneVisualizer {
-    fn fold(&mut self, ident: Ident) -> Ident {
+impl Fold for HygieneVisualizer {
+    fn fold_ident(&mut self, ident: Ident) -> Ident {
         Ident {
             sym: format!("{}{:?}", ident.sym, ident.span.ctxt()).into(),
             ..ident

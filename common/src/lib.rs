@@ -1,21 +1,33 @@
-#![cfg_attr(feature = "fold", feature(specialization))]
+//! Utilities for the swc project
+//!
+//!
+//! # Cargo features
+//!
+//! ## `tty-emitter`
+//!
+//! Adds default implementation of Emitter.
+//! Enabling this feature will add tty-related dependencies.
+//!
+//! ## `sourcemap`
+//!
+//! Adds methods to generator web sourcemap.
+#![deny(unused)]
 
-#[cfg(feature = "fold")]
-pub use self::fold::{Fold, FoldWith, Visit, VisitMut, VisitMutWith, VisitWith};
 pub use self::{
     errors::{SourceMapper, SourceMapperDyn},
     pos::{
         hygiene, BytePos, CharPos, FileName, Globals, Loc, LocWithOpt, Mark, MultiSpan, SourceFile,
-        SourceFileAndBytePos, SourceFileAndLine, Span, SpanData, SpanLinesError, Spanned,
-        SyntaxContext, DUMMY_SP, GLOBALS, NO_EXPANSION,
+        SourceFileAndBytePos, SourceFileAndLine, Span, SpanLinesError, Spanned, SyntaxContext,
+        DUMMY_SP, GLOBALS, NO_EXPANSION,
     },
     source_map::{FileLines, FileLoader, FilePathMapping, SourceMap, SpanSnippetError},
     syntax_pos::LineCol,
 };
-pub use ast_node::{ast_node, DeserializeEnum, Fold, Spanned};
+pub use ast_node::{ast_node, DeserializeEnum, Spanned};
 pub use from_variant::FromVariant;
 use serde::Serialize;
 use std::fmt::Debug;
+pub use swc_visit::chain;
 
 /// A trait for ast nodes.
 pub trait AstNode: Debug + PartialEq + Clone + Spanned + Serialize {
@@ -24,8 +36,6 @@ pub trait AstNode: Debug + PartialEq + Clone + Spanned + Serialize {
 
 pub mod comments;
 pub mod errors;
-#[cfg(feature = "fold")]
-pub mod fold;
 pub mod input;
 pub mod iter;
 pub mod macros;
@@ -34,6 +44,6 @@ mod pos;
 mod rustc_data_structures;
 pub mod serializer;
 mod source_map;
-mod sync;
+pub mod sync;
 mod syntax_pos;
 pub mod util;

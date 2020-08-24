@@ -1,5 +1,3 @@
-#![feature(box_syntax)]
-#![feature(try_blocks)]
 #![feature(test)]
 
 extern crate test;
@@ -16,11 +14,13 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
-use swc_common::{fold::FoldWith, input::SourceFileInput, FromVariant, Mark};
+use swc_common::{input::StringInput, FromVariant, Mark};
 use swc_ecma_ast::*;
 use swc_ecma_codegen::Emitter;
-use swc_ecma_parser::{EsConfig, Parser, Session, Syntax};
+use swc_ecma_parser::{EsConfig, Parser, Syntax};
 use swc_ecma_preset_env::{preset_env, Config, FeatureOrModule, Mode, Targets, Version};
+use swc_ecma_transforms::util::drop_span;
+use swc_ecma_visit::FoldWith;
 use test::{test_main, ShouldPanic, TestDesc, TestDescAndFn, TestFn, TestName, TestType};
 use testing::Tester;
 use walkdir::WalkDir;
@@ -158,10 +158,10 @@ fn load() -> Result<Vec<TestDescAndFn>, Error> {
                 allow_fail: false,
                 should_panic: ShouldPanic::No,
             },
-            testfn: TestFn::DynTestFn(box move || {
+            testfn: TestFn::DynTestFn(Box::new(move || {
                 //
                 exec(cfg, e.path().to_path_buf()).expect("failed to run test")
-            }),
+            })),
         });
     }
 
@@ -203,18 +203,16 @@ fn exec(c: PresetConfig, dir: PathBuf) -> Result<(), Error> {
             let print = |m: &Module| {
                 let mut buf = vec![];
                 {
-                    let handlers = box MyHandlers;
                     let mut emitter = Emitter {
                         cfg: swc_ecma_codegen::Config { minify: false },
                         comments: None,
                         cm: cm.clone(),
-                        wr: box swc_ecma_codegen::text_writer::JsWriter::new(
+                        wr: Box::new(swc_ecma_codegen::text_writer::JsWriter::new(
                             cm.clone(),
                             "\n",
                             &mut buf,
                             None,
-                        ),
-                        handlers,
+                        )),
                     };
 
                     emitter.emit_module(m).expect("failed to emit module");
@@ -226,16 +224,22 @@ fn exec(c: PresetConfig, dir: PathBuf) -> Result<(), Error> {
                 .load_file(&dir.join("input.mjs"))
                 .expect("failed to load file");
             let mut p = Parser::new(
-                Session { handler: &handler },
                 Syntax::Es(EsConfig {
                     dynamic_import: true,
                     ..Default::default()
                 }),
-                SourceFileInput::from(&*fm),
+                StringInput::from(&*fm),
                 None,
             );
 
-            let module = p.parse_module().map_err(|mut e| e.emit())?;
+            let module = p
+                .parse_module()
+                .map_err(|e| e.into_diagnostic(&handler).emit())?;
+
+            for e in p.take_errors() {
+                e.into_diagnostic(&handler).emit()
+            }
+
             let actual = module.fold_with(&mut pass);
 
             // debug mode?
@@ -257,16 +261,21 @@ fn exec(c: PresetConfig, dir: PathBuf) -> Result<(), Error> {
                     .expect("failed to load output file");
 
                 let mut p = Parser::new(
-                    Session { handler: &handler },
                     Syntax::Es(EsConfig {
                         dynamic_import: true,
                         ..Default::default()
                     }),
-                    SourceFileInput::from(&*fm),
+                    StringInput::from(&*fm),
                     None,
                 );
 
-                let mut m = p.parse_module().map_err(|mut e| e.emit())?;
+                let mut m = p
+                    .parse_module()
+                    .map_err(|e| e.into_diagnostic(&handler).emit())?;
+
+                for e in p.take_errors() {
+                    e.into_diagnostic(&handler).emit()
+                }
 
                 m.body.sort_by(|a, b| match *a {
                     ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
@@ -294,6 +303,10 @@ fn exec(c: PresetConfig, dir: PathBuf) -> Result<(), Error> {
 
             let actual_src = print(&actual);
             let expected_src = print(&expected);
+
+            if drop_span(actual) == drop_span(expected) {
+                return Ok(());
+            }
 
             if actual_src != expected_src {
                 panic!(
@@ -325,7 +338,3 @@ fn fixtures() {
     let args: Vec<_> = env::args().collect();
     test_main(&args, tests, Some(test::Options::new()));
 }
-
-struct MyHandlers;
-
-impl swc_ecma_codegen::Handlers for MyHandlers {}

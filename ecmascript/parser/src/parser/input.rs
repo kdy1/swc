@@ -1,13 +1,16 @@
 use super::Parser;
 use crate::{
+    error::Error,
     lexer::{self},
     token::*,
     Context, JscTarget, Syntax,
 };
 use lexer::TokenContexts;
-use std::{cell::RefCell, mem, rc::Rc};
-use swc_common::{BytePos, Span, SpanData, DUMMY_SP};
+use std::{cell::RefCell, mem, mem::take, rc::Rc};
+use swc_common::{BytePos, Span, DUMMY_SP};
 
+/// Clone should be cheap if you are parsing typescript because typescript
+/// syntax requires backtracking.
 pub trait Tokens: Clone + Iterator<Item = TokenAndSpan> {
     fn set_ctx(&mut self, ctx: Context);
     fn ctx(&self) -> Context;
@@ -18,6 +21,13 @@ pub trait Tokens: Clone + Iterator<Item = TokenAndSpan> {
     fn token_context(&self) -> &lexer::TokenContexts;
     fn token_context_mut(&mut self) -> &mut lexer::TokenContexts;
     fn set_token_context(&mut self, _c: lexer::TokenContexts);
+
+    /// Implementors should use Rc<RefCell<Vec<Error>>>.
+    ///
+    /// It is required because parser should backtrack while parsing typescript
+    /// code.
+    fn add_error(&self, error: Error);
+    fn take_errors(&mut self) -> Vec<Error>;
 }
 
 #[derive(Clone)]
@@ -27,6 +37,7 @@ pub struct TokensInput {
     syntax: Syntax,
     target: JscTarget,
     token_ctx: TokenContexts,
+    errors: Rc<RefCell<Vec<Error>>>,
 }
 
 impl TokensInput {
@@ -37,6 +48,7 @@ impl TokensInput {
             syntax,
             target,
             token_ctx: Default::default(),
+            errors: Default::default(),
         }
     }
 }
@@ -77,6 +89,14 @@ impl Tokens for TokensInput {
 
     fn set_token_context(&mut self, c: TokenContexts) {
         self.token_ctx = c;
+    }
+
+    fn add_error(&self, error: Error) {
+        self.errors.borrow_mut().push(error);
+    }
+
+    fn take_errors(&mut self) -> Vec<Error> {
+        take(&mut self.errors.borrow_mut())
     }
 }
 
@@ -168,6 +188,14 @@ impl<I: Tokens> Tokens for Capturing<I> {
     fn set_token_context(&mut self, c: TokenContexts) {
         self.inner.set_token_context(c)
     }
+
+    fn add_error(&self, error: Error) {
+        self.inner.add_error(error);
+    }
+
+    fn take_errors(&mut self) -> Vec<Error> {
+        self.inner.take_errors()
+    }
 }
 
 /// This struct is responsible for managing current token and peeked token.
@@ -175,15 +203,18 @@ impl<I: Tokens> Tokens for Capturing<I> {
 pub(super) struct Buffer<I: Tokens> {
     iter: I,
     /// Span of the previous token.
-    prev_span: SpanData,
+    prev_span: Span,
     cur: Option<TokenAndSpan>,
     /// Peeked token
     next: Option<TokenAndSpan>,
 }
 
-impl<I: Tokens> Parser<'_, I> {
+impl<I: Tokens> Parser<I> {
     pub fn input(&mut self) -> &mut I {
         &mut self.input.iter
+    }
+    pub(crate) fn input_ref(&self) -> &I {
+        &self.input.iter
     }
 }
 
@@ -192,7 +223,7 @@ impl<I: Tokens> Buffer<I> {
         Buffer {
             iter: lexer,
             cur: None,
-            prev_span: DUMMY_SP.data(),
+            prev_span: DUMMY_SP,
             next: None,
         }
     }
@@ -229,13 +260,18 @@ impl<I: Tokens> Buffer<I> {
 
     /// Returns current token.
     pub fn bump(&mut self) -> Token {
+        #[cold]
+        #[inline(never)]
+        fn invalid_state() -> ! {
+            unreachable!(
+                "Current token is `None`. Parser should not call bump() without knowing current \
+                 token"
+            )
+        }
+
         let prev = match self.cur.take() {
             Some(t) => t,
-
-            None => unreachable!(
-                "Current token is `None`. Parser should not call bump()without knowing current \
-                 token"
-            ),
+            None => invalid_state(),
         };
         self.prev_span = prev.span;
 
@@ -282,7 +318,7 @@ impl<I: Tokens> Buffer<I> {
     }
 
     /// Get current token. Returns `None` only on eof.
-    #[inline(always)]
+    #[inline]
     pub fn cur(&mut self) -> Option<&Token> {
         if self.cur.is_none() {
             self.bump_inner();
@@ -290,7 +326,7 @@ impl<I: Tokens> Buffer<I> {
         self.cur.as_ref().map(|item| &item.token)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is(&mut self, expected: &Token) -> bool {
         match self.cur() {
             Some(t) => *expected == *t,
@@ -298,7 +334,7 @@ impl<I: Tokens> Buffer<I> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn peeked_is(&mut self, expected: &Token) -> bool {
         match self.peek() {
             Some(t) => *expected == *t,
@@ -306,7 +342,7 @@ impl<I: Tokens> Buffer<I> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn eat(&mut self, expected: &Token) -> bool {
         let v = self.is(expected);
         if v {
@@ -315,13 +351,19 @@ impl<I: Tokens> Buffer<I> {
         v
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn eat_keyword(&mut self, kwd: Keyword) -> bool {
-        self.eat(&Word(Word::Keyword(kwd)))
+        match self.cur() {
+            Some(Token::Word(Word::Keyword(k))) if *k == kwd => {
+                self.bump();
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Returns start of current token.
-    #[inline(always)]
+    #[inline]
     pub fn cur_pos(&mut self) -> BytePos {
         let _ = self.cur();
         self.cur
@@ -333,7 +375,7 @@ impl<I: Tokens> Buffer<I> {
             })
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn cur_span(&self) -> Span {
         let data = self
             .cur
@@ -345,50 +387,50 @@ impl<I: Tokens> Buffer<I> {
     }
 
     /// Returns last byte position of previous token.
-    #[inline(always)]
+    #[inline]
     pub fn last_pos(&self) -> BytePos {
         self.prev_span.hi
     }
 
     /// Returns span of the previous token.
-    #[inline(always)]
-    pub fn prev_span(&self) -> SpanData {
+    #[inline]
+    pub fn prev_span(&self) -> Span {
         self.prev_span
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn get_ctx(&self) -> Context {
         self.iter.ctx()
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn set_ctx(&mut self, ctx: Context) {
         self.iter.set_ctx(ctx);
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn syntax(&self) -> Syntax {
         self.iter.syntax()
     }
-    #[inline(always)]
+    #[inline]
     pub fn target(&self) -> JscTarget {
         self.iter.target()
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn set_expr_allowed(&mut self, allow: bool) {
         self.iter.set_expr_allowed(allow)
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn token_context(&self) -> &lexer::TokenContexts {
         self.iter.token_context()
     }
-    #[inline(always)]
+    #[inline]
     pub(crate) fn token_context_mut(&mut self) -> &mut lexer::TokenContexts {
         self.iter.token_context_mut()
     }
-    #[inline(always)]
+    #[inline]
     pub(crate) fn set_token_context(&mut self, c: lexer::TokenContexts) {
         self.iter.set_token_context(c)
     }

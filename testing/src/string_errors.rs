@@ -3,19 +3,22 @@ use std::{
     io::{self, Write},
     sync::{Arc, RwLock},
 };
-use swc_common::errors::{EmitterWriter, Handler, HandlerFlags, SourceMapperDyn};
+use swc_common::{
+    errors::{EmitterWriter, Handler, HandlerFlags, SourceMapperDyn},
+    sync::Lrc,
+};
 
 /// Creates a new handler for testing.
 pub(crate) fn new_handler(
-    cm: Arc<SourceMapperDyn>,
+    cm: Lrc<SourceMapperDyn>,
     treat_err_as_bug: bool,
 ) -> (Handler, BufferedError) {
     let buf: BufferedError = Default::default();
 
-    let e = EmitterWriter::new(box buf.clone(), Some(cm.clone()), false, true);
+    let e = EmitterWriter::new(Box::new(buf.clone()), Some(cm.clone()), false, true);
 
     let handler = Handler::with_emitter_and_flags(
-        box e,
+        Box::new(e),
         HandlerFlags {
             treat_err_as_bug,
             can_emit_warnings: true,

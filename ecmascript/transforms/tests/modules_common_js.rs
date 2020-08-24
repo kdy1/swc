@@ -1,13 +1,11 @@
-#![feature(box_syntax)]
 #![feature(test)]
-#![feature(box_patterns)]
-#![feature(specialization)]
-
-use swc_common::{chain, Fold, Mark};
-use swc_ecma_ast::*;
+use swc_common::{chain, Mark};
+use swc_ecma_parser::{Syntax, TsConfig};
 use swc_ecma_transforms::{
-    compat, fixer,
-    helpers::InjectHelpers,
+    compat,
+    compat::es2020::class_properties,
+    fixer,
+    helpers::inject_helpers,
     hygiene,
     modules::{
         common_js::{common_js, Config},
@@ -15,18 +13,24 @@ use swc_ecma_transforms::{
         util::Lazy,
     },
     optimization::simplifier,
-    proposals::{class_properties, decorators, export},
+    proposals::{decorators, export},
     resolver_with_mark, typescript,
 };
+use swc_ecma_visit::Fold;
 
 #[macro_use]
 mod common;
 
-fn syntax() -> ::swc_ecma_parser::Syntax {
+fn syntax() -> Syntax {
     Default::default()
 }
+fn ts_syntax() -> Syntax {
+    Syntax::Typescript(TsConfig {
+        ..Default::default()
+    })
+}
 
-fn tr(config: Config) -> impl Fold<Module> {
+fn tr(config: Config) -> impl Fold {
     let mark = Mark::fresh(Mark::root());
 
     chain!(resolver_with_mark(mark), common_js(mark, config))
@@ -89,10 +93,10 @@ test!(
             resolver_with_mark(mark),
             // Optional::new(typescript::strip(), syntax.typescript()),
             import_analyzer(),
-            InjectHelpers,
+            inject_helpers(),
             common_js(mark, Default::default()),
             hygiene(),
-            fixer()
+            fixer(None)
         )
     },
     issue_389_2,
@@ -126,7 +130,7 @@ test!(
         compat::es2015(Mark::fresh(Mark::root()), Default::default()),
         compat::es3(true),
         import_analyzer(),
-        InjectHelpers,
+        inject_helpers(),
         common_js(Mark::fresh(Mark::root()), Default::default()),
     ),
     issue_389_3,
@@ -3896,7 +3900,7 @@ test!(
 
         chain!(
             resolver_with_mark(mark),
-            compat::es2015::BlockScopedFns,
+            compat::es2015::block_scoped_functions(),
             compat::es2015::block_scoping(),
             common_js(mark, Default::default()),
         )
@@ -4154,4 +4158,71 @@ const resources = [
           label: 'Instagram'
       }
   ];"
+);
+
+test!(
+    ts_syntax(),
+    |_| tr(Config {
+        ..Default::default()
+    }),
+    issue_895,
+    "import { queryString } from './url'
+
+export function setup(url: string, obj: any) {
+  const _queryString = queryString(obj)
+  const _url = url + '?' + _queryString
+  return _url
+}",
+    "'use strict';
+Object.defineProperty(exports, '__esModule', {
+    value: true
+});
+exports.setup = setup;
+var _url = require('./url');
+function setup(url: string, obj: any) {
+    const _queryString = _url.queryString(obj);
+    const _url1 = url + '?' + _queryString;
+    return _url1;
+}"
+);
+
+test!(
+    syntax(),
+    |_| tr(Config {
+        ..Default::default()
+    }),
+    issue_962,
+    "import root from './_root.js';
+  import stubFalse from './stubFalse.js';
+    
+  var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
+  var freeModule = freeExports && typeof module == 'object' && module && !module.nodeType && \
+     module;
+    
+  var moduleExports = freeModule && freeModule.exports === freeExports;
+    
+  var Buffer = moduleExports ? root.Buffer : undefined;
+    
+  var nativeIsBuffer = Buffer ? Buffer.isBuffer : undefined;
+    
+  var isBuffer = nativeIsBuffer || stubFalse;
+    
+  export default isBuffer",
+    r#"
+    "use strict";
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    exports.default = void 0;
+    var _rootJs = _interopRequireDefault(require("./_root.js"));
+    var _stubFalseJs = _interopRequireDefault(require("./stubFalse.js"));
+    var freeExports = typeof exports == "object" && exports && !exports.nodeType && exports;
+    var freeModule = freeExports && typeof module == "object" && module && !module.nodeType && module;
+    var moduleExports = freeModule && freeModule.exports === freeExports;
+    var Buffer = moduleExports ? _rootJs.default.Buffer : undefined;
+    var nativeIsBuffer = Buffer ? Buffer.isBuffer : undefined;
+    var isBuffer = nativeIsBuffer || _stubFalseJs.default;
+    var _default = isBuffer;
+    exports.default = _default;
+"#
 );
