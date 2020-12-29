@@ -14,6 +14,7 @@ all-features = true
 [features]
 codegen = ["swc_ecma_codegen"]
 dep_graph = ["swc_ecma_dep_graph"]
+minifier = ["swc_ecma_minifier"]
 parser = ["swc_ecma_parser"]
 transforms = ["swc_ecma_transforms"]
 utils = ["swc_ecma_utils"]
@@ -30,6 +31,7 @@ typescript = ["swc_ecma_transforms/typescript"]
 swc_ecma_ast = {version = "0.43.1", path = "./ast"}
 swc_ecma_codegen = {version = "0.52.3", path = "./codegen", optional = true}
 swc_ecma_dep_graph = {version = "0.22.2", path = "./dep-graph", optional = true}
+swc_ecma_minifier = {version = "0.1.0", path = "./minifier", optional = true}
 swc_ecma_parser = {version = "0.54.3", path = "./parser", optional = true}
 swc_ecma_transforms = {version = "0.46.0", path = "./transforms", optional = true}
 swc_ecma_utils = {version = "0.34.1", path = "./utils", optional = true}
