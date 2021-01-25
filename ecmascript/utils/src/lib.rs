@@ -414,8 +414,11 @@ pub trait ExprExt {
         if expr.is_ident_ref_to(js_word!("NaN")) {
             return (Pure, Known(false));
         }
+        if expr.is_ident_ref_to(js_word!("Infinity")) {
+            return (Pure, Known(true));
+        }
 
-        let val = match *expr {
+        let val = match expr {
             Expr::Paren(ref e) => return e.expr.as_bool(),
             Expr::Assign(AssignExpr { ref right, .. }) => {
                 let (_, v) = right.as_bool();
@@ -431,6 +434,25 @@ pub trait ExprExt {
                 return (p, !v);
             }
             Expr::Seq(SeqExpr { ref exprs, .. }) => exprs.last().unwrap().as_bool().1,
+
+            Expr::Bin(BinExpr {
+                left,
+                op: op!("/"),
+                right,
+                ..
+            }) => {
+                let lv = left.as_number();
+                let rv = right.as_number();
+
+                match (lv, rv) {
+                    (Known(lv), Known(rv)) => {
+                        let v = lv / rv;
+
+                        return (Pure, Known(v != 0.0));
+                    }
+                    _ => Unknown,
+                }
+            }
 
             Expr::Bin(BinExpr {
                 ref left,
@@ -449,7 +471,7 @@ pub trait ExprExt {
                 let (lp, lv) = left.as_bool();
                 let (rp, rv) = right.as_bool();
 
-                let v = if op == op!("&") {
+                let v = if *op == op!("&") {
                     lv.and(rv)
                 } else {
                     lv.or(rv)
