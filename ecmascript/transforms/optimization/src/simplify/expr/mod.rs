@@ -724,6 +724,7 @@ impl SimplifyExpr {
                     ..
                 }) => return *arg,
                 Expr::Lit(Lit::Num(Number { value: f, .. })) => {
+                    self.changed = true;
                     return Expr::Lit(Lit::Num(Number { value: -f, span }));
                 }
                 _ => {
@@ -746,6 +747,7 @@ impl SimplifyExpr {
             op!("~") => {
                 if let Known(value) = arg.as_number() {
                     if value.fract() == 0.0 {
+                        self.changed = true;
                         return Expr::Lit(Lit::Num(Number {
                             span,
                             value: if value < 0.0 {
