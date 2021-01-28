@@ -576,6 +576,7 @@ impl SimplifyExpr {
                 {
                     if left_op == op {
                         if let Known(value) = self.perform_arithmetic_op(op, &left_rhs, &right) {
+                            self.changed = true;
                             return Expr::Bin(BinExpr {
                                 span,
                                 left: left_lhs,
@@ -584,7 +585,6 @@ impl SimplifyExpr {
                             });
                         }
                     }
-                    self.changed = true;
                     left = Box::new(Expr::Bin(BinExpr {
                         left: left_lhs,
                         op: left_op,
