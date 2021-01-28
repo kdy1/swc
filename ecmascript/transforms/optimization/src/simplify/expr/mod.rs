@@ -675,7 +675,10 @@ impl SimplifyExpr {
                 }
 
                 match arg.as_bool() {
-                    (_, Known(val)) => return make_bool_expr(span, !val, iter::once(arg)),
+                    (_, Known(val)) => {
+                        self.changed = true;
+                        return make_bool_expr(span, !val, iter::once(arg));
+                    }
                     _ => return Expr::Unary(UnaryExpr { op, arg, span }),
                 }
             }
@@ -822,10 +825,12 @@ impl SimplifyExpr {
                 // advantage of that without some kind of non-NaN proof.  So the special cases
                 // here only deal with 1*x
                 if Known(1.0) == lv {
+                    self.changed = true;
                     // TODO: cloneTree()
                     return rv;
                 }
                 if Known(1.0) == rv {
+                    self.changed = true;
                     // TODO: cloneTree()
                     return lv;
                 }
