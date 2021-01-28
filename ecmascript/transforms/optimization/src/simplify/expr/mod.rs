@@ -1144,7 +1144,7 @@ impl Fold for SimplifyExpr {
                         _ => ps.push(p),
                     }
                 }
-
+                self.changed = true;
                 ObjectLit { span, props: ps }.into()
             }
 
@@ -1157,6 +1157,7 @@ impl Fold for SimplifyExpr {
                 {
                     let e = &*e.args.into_iter().next().unwrap().pop().unwrap().expr;
                     if let Known(value) = e.as_string() {
+                        self.changed = true;
                         return Expr::Lit(Lit::Str(Str {
                             span: e.span(),
                             value: value.into(),
