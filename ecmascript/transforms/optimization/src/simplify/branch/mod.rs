@@ -1189,6 +1189,22 @@ fn ignore_result(e: Expr) -> Option<Expr> {
         }
 
         Expr::Unary(UnaryExpr { span, op, arg }) => match op {
+            // Don't remove ! from negated iifes.
+            op!("!")
+                if match &*arg {
+                    Expr::Call(call) => match &call.callee {
+                        ExprOrSuper::Expr(callee) => match &**callee {
+                            Expr::Fn(..) => true,
+                            _ => false,
+                        },
+                        _ => false,
+                    },
+                    _ => false,
+                } =>
+            {
+                Some(Expr::Unary(UnaryExpr { span, op, arg }))
+            }
+
             op!("void")
             | op!("typeof")
             | op!(unary, "+")
