@@ -316,6 +316,7 @@ impl SimplifyExpr {
                     if let (Known(l), Known(r)) = (left.as_string(), right.as_string()) {
                         let mut l = l.into_owned();
                         l.push_str(&r);
+                        self.changed = true;
                         return Expr::Lit(Lit::Str(Str {
                             value: l.into(),
                             span,
@@ -345,6 +346,7 @@ impl SimplifyExpr {
                             if !left.may_have_side_effects() && !right.may_have_side_effects() {
                                 if let (Known(l), Known(r)) = (left.as_string(), right.as_string())
                                 {
+                                    self.changed = true;
                                     return Expr::Lit(Lit::Str(Str {
                                         value: format!("{}{}", l, r).into(),
                                         span,
@@ -372,6 +374,7 @@ impl SimplifyExpr {
                                 left, right, span, ..
                             }) => match self.perform_arithmetic_op(op!(bin, "+"), &left, &right) {
                                 Known(v) => {
+                                    self.changed = true;
                                     return preserve_effects(
                                         span,
                                         Expr::Lit(Lit::Num(Number { value: v, span })),
@@ -414,8 +417,10 @@ impl SimplifyExpr {
                     };
 
                     return if !left.may_have_side_effects() {
+                        self.changed = true;
                         *node
                     } else {
+                        self.changed = true;
                         let seq = SeqExpr {
                             span,
                             exprs: vec![left, node],
@@ -479,10 +484,13 @@ impl SimplifyExpr {
 
                 // Non-object types are never instances.
                 if is_non_obj(&left) {
+                    self.changed = true;
                     return make_bool_expr(span, false, iter::once(right));
                 }
 
                 if is_obj(&left) && right.is_ident_ref_to(js_word!("Object")) {
+                if right.is_ident_ref_to(js_word!("Object")) {
+                    self.changed = true;
                     return make_bool_expr(span, true, iter::once(left));
                 }
 
@@ -576,6 +584,7 @@ impl SimplifyExpr {
                             });
                         }
                     }
+                    self.changed = true;
                     left = Box::new(Expr::Bin(BinExpr {
                         left: left_lhs,
                         op: left_op,
