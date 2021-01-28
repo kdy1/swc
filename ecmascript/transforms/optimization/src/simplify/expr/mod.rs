@@ -285,7 +285,7 @@ impl SimplifyExpr {
                 match $v {
                     Known(v) => {
                         // TODO: Optimize
-
+                        self.changed = true;
                         return make_bool_expr(span, v, {
                             iter::once(left).chain(iter::once(right))
                         });
@@ -296,6 +296,7 @@ impl SimplifyExpr {
             (number, $v:expr) => {{
                 match $v {
                     Known(v) => {
+                        self.changed = true;
                         return preserve_effects(
                             span,
                             Expr::Lit(Lit::Num(Number { value: v, span })),
@@ -641,6 +642,8 @@ impl SimplifyExpr {
                 });
             }
         };
+
+        self.changed = true;
 
         Expr::Lit(Lit::Str(Str {
             span,
