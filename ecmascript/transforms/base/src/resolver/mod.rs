@@ -1207,6 +1207,11 @@ impl<'a> VisitMut for Resolver<'a> {
 
         decl.body.visit_mut_children_with(&mut child_folder);
     }
+
+    fn visit_mut_expr_stmt(&mut self, s: &mut ExprStmt) {
+        self.ident_type = IdentType::Ref;
+        s.visit_mut_children_with(self);
+    }
 }
 
 /// The folder which handles var / function hoisting.
@@ -1279,7 +1284,13 @@ impl VisitMut for Hoister<'_, '_> {
     }
 
     #[inline]
-    fn visit_mut_catch_clause(&mut self, _: &mut CatchClause) {}
+    fn visit_mut_catch_clause(&mut self, c: &mut CatchClause) {
+        self.resolver.in_type = false;
+        let old = self.kind;
+        self.kind = Some(VarDeclKind::Var);
+        c.visit_mut_children_with(self);
+        self.kind = old;
+    }
 
     #[inline]
     fn visit_mut_pat_or_expr(&mut self, _: &mut PatOrExpr) {}
