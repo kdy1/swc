@@ -238,6 +238,7 @@ impl SimplifyExpr {
                         },
                         _ => unreachable!(),
                     });
+                    let idx = idx.map(|idx| props.len() - 1 - idx);
                     //
 
                     match idx {
