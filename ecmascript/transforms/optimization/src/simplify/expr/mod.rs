@@ -48,7 +48,7 @@ pub fn expr_simplifier() -> impl RepeatedJsPass + 'static {
 #[derive(Debug, Default)]
 struct SimplifyExpr {
     changed: bool,
-    is_arg_of_update: bool,
+    is_modifying: bool,
 }
 
 impl CompilerPass for SimplifyExpr {
@@ -69,7 +69,7 @@ impl Repeated for SimplifyExpr {
 
 impl SimplifyExpr {
     fn fold_member_expr(&mut self, e: MemberExpr) -> Expr {
-        if self.is_arg_of_update {
+        if self.is_modifying {
             return Expr::Member(e);
         }
 
@@ -1070,20 +1070,17 @@ impl SimplifyExpr {
 impl Fold for SimplifyExpr {
     noop_fold_type!();
 
-    fn fold_stmt(&mut self, s: Stmt) -> Stmt {
-        let old = self.is_arg_of_update;
-        self.is_arg_of_update = false;
-        let s = s.fold_children_with(self);
-        self.is_arg_of_update = old;
-        s
-    }
+    fn fold_assign_expr(&mut self, n: AssignExpr) -> AssignExpr {
+        let old = self.is_modifying;
+        self.is_modifying = true;
+        let left = n.left.fold_with(self);
+        self.is_modifying = old;
 
-    fn fold_update_expr(&mut self, n: UpdateExpr) -> UpdateExpr {
-        let old = self.is_arg_of_update;
-        self.is_arg_of_update = true;
-        let arg = n.arg.fold_with(self);
-        self.is_arg_of_update = old;
-        UpdateExpr { arg, ..n }
+        self.is_modifying = false;
+        let right = n.right.fold_with(self);
+        self.is_modifying = old;
+
+        AssignExpr { left, right, ..n }
     }
 
     fn fold_expr(&mut self, expr: Expr) -> Expr {
@@ -1294,6 +1291,22 @@ impl Fold for SimplifyExpr {
             exprs,
             span: e.span,
         }
+    }
+
+    fn fold_stmt(&mut self, s: Stmt) -> Stmt {
+        let old = self.is_modifying;
+        self.is_modifying = false;
+        let s = s.fold_children_with(self);
+        self.is_modifying = old;
+        s
+    }
+
+    fn fold_update_expr(&mut self, n: UpdateExpr) -> UpdateExpr {
+        let old = self.is_modifying;
+        self.is_modifying = true;
+        let arg = n.arg.fold_with(self);
+        self.is_modifying = old;
+        UpdateExpr { arg, ..n }
     }
 }
 
