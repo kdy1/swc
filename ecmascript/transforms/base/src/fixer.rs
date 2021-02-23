@@ -83,10 +83,6 @@ impl VisitMut for Fixer<'_> {
             | Expr::Seq(..)
             | Expr::Unary(..)
             | Expr::Lit(..) => self.wrap(&mut node.callee),
-            Expr::Call(..) | Expr::Bin(..) | Expr::Assign(..) | Expr::Seq(..) | Expr::Unary(..) => {
-            Expr::Call(..) | Expr::Bin(..) | Expr::Assign(..) | Expr::Seq(..) => {
-                self.wrap(&mut node.callee)
-            }
             _ => {}
         }
         self.ctx = old;
@@ -168,8 +164,6 @@ impl VisitMut for Fixer<'_> {
                         }
                     }
                 } else if op_of_rhs.precedence() <= expr.op.precedence() {
-                if op_of_rhs.precedence() < expr.op.precedence() {
-                if op_of_rhs.precedence() <= expr.op.precedence() {
                     self.wrap(&mut expr.right);
                 }
             }
