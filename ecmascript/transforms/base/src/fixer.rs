@@ -180,7 +180,10 @@ impl VisitMut for Fixer<'_> {
         };
 
         match &mut *expr.left {
-            Expr::Bin(BinExpr { op: op!("??"), .. }) => {
+            Expr::Bin(BinExpr {
+                op: op!("??") | op!("in"),
+                ..
+            }) => {
                 self.wrap(&mut expr.left);
             }
 
