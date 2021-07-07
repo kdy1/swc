@@ -154,7 +154,6 @@ impl<I: Input> Tokens for Lexer<'_, I> {
 impl<'a, I: Input> Iterator for Lexer<'a, I> {
     type Item = TokenAndSpan;
     fn next(&mut self) -> Option<Self::Item> {
-        let was_first = self.state.is_first;
         let mut start = self.cur_pos();
 
         let res = (|| -> Result<Option<_>, _> {
@@ -194,9 +193,10 @@ impl<'a, I: Input> Iterator for Lexer<'a, I> {
                         {
                             let comments = self.comments.as_mut().unwrap();
 
-                            // if the file had no tokens, then treat any comments in the leading
-                            // comments buffer as leading. Otherwise treat them as trailing.
-                            if was_first {
+                            // if the file had no tokens and no shebang, then treat any
+                            // comments in the leading comments buffer as leading.
+                            // Otherwise treat them as trailing.
+                            if last == BytePos(0) {
                                 comments.add_leading(last, c);
                             } else {
                                 comments.add_trailing(last, c);
@@ -215,16 +215,6 @@ impl<'a, I: Input> Iterator for Lexer<'a, I> {
             // );
 
             self.state.start = start;
-
-            if self.syntax.typescript() && self.ctx.in_type {
-                if c == '<' {
-                    self.input.bump();
-                    return Ok(Some(tok!('<')));
-                } else if c == '>' {
-                    self.input.bump();
-                    return Ok(Some(tok!('>')));
-                }
-            }
 
             if self.syntax.jsx() && !self.ctx.in_property_name && !self.ctx.in_type {
                 //jsx
@@ -264,10 +254,20 @@ impl<'a, I: Input> Iterator for Lexer<'a, I> {
                 start: start_pos_of_tpl,
             }) = self.state.context.current()
             {
-                self.read_tmpl_token(start_pos_of_tpl).map(Some)
-            } else {
-                self.read_token()
+                return self.read_tmpl_token(start_pos_of_tpl).map(Some);
             }
+
+            if self.syntax.typescript() && self.ctx.in_type {
+                if c == '<' {
+                    self.input.bump();
+                    return Ok(Some(tok!('<')));
+                } else if c == '>' {
+                    self.input.bump();
+                    return Ok(Some(tok!('>')));
+                }
+            }
+
+            self.read_token()
         })();
 
         let token = match res.map_err(Token::Error).map_err(Some) {
