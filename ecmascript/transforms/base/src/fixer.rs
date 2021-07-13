@@ -1298,4 +1298,6 @@ var store = global[SHARED] || (global[SHARED] = {});
     test_fixer!(minifier_006, "-('s'/'b')", "-('s'/'b')");
 
     test_fixer!(minifier_007, "(void 0) === value", "void 0 === value");
+
+    test_fixer!(minifier_008, "(size--) && (b = (c))", "size-- && (b = c)");
 }
