@@ -1276,5 +1276,8 @@ var store = global[SHARED] || (global[SHARED] = {});
     test_fixer!(new_member_2, "new (obj.ctor)", "new obj.ctor");
 
     test_fixer!(minifier_005, "-(1/0)", "-1/0");
+
     test_fixer!(minifier_006, "-('s'/'b')", "-('s'/'b')");
+
+    test_fixer!(minifier_007, "(void 0) === value", "void 0 === value");
 }
