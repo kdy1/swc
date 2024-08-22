@@ -64,9 +64,9 @@ impl PluginSerializedBytes {
     where
         W: rkyv::Serialize<rkyv::ser::serializers::AllocSerializer<512>>,
         W: serde::Serialize,
+        W: prost::Message,
     {
-        let vec = rmp_serde::to_vec_named(&t.0)
-            .context("failed to serialize using rmp_serde::to_vec_named")?;
+        let vec = t.0.encode_to_vec();
         Ok(PluginSerializedBytes { field: vec })
     }
 
@@ -94,13 +94,15 @@ impl PluginSerializedBytes {
     }
 
     #[tracing::instrument(level = "info", skip_all)]
-    pub fn deserialize<W>(&self) -> Result<VersionedSerializable<W>, Error>
+    pub fn deserialize<W>(self) -> Result<VersionedSerializable<W>, Error>
     where
         W: serde::de::DeserializeOwned,
         W: rkyv::Archive,
         W::Archived: rkyv::Deserialize<W, rkyv::de::deserializers::SharedDeserializeMap>,
+        W: prost::Message + Default,
     {
-        let v = rmp_serde::from_slice(&self.field).context("failed to deserialize")?;
+        let v = prost::Message::decode(prost::bytes::Bytes::from(self.field))
+            .context("failed to deserialize")?;
         Ok(VersionedSerializable::new(v))
     }
 }
