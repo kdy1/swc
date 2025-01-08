@@ -120,7 +120,11 @@ where
     #[emitter]
     fn emit_jsx_expr_container(&mut self, node: &JSXExprContainer) -> Result {
         punct!("{");
+        self.emit_leading_comments_of_span(node.span, false)?;
+
         emit!(node.expr);
+
+        self.emit_trailing_comments_of_pos(node.span.hi(), true, true)?;
         punct!("}");
     }
 
