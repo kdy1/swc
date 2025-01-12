@@ -5518,6 +5518,7 @@ dependencies = [
 name = "swc_ecma_transforms_optimization"
 version = "7.1.1"
 dependencies = [
+ "ahash",
  "dashmap 5.5.3",
  "indexmap 2.7.1",
  "once_cell",
