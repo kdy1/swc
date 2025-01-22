@@ -1,6 +1,8 @@
 #![allow(clippy::needless_update)]
 
-use rustc_hash::FxHashSet;
+use std::sync::Arc;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 use swc_common::{collections::AHashSet, SyntaxContext};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{collect_decls, BindingCollector};
@@ -54,8 +56,12 @@ pub enum AccessKind {
 
 pub type Access = (Id, AccessKind);
 
+type Set = FxHashSet<Access>;
+
 #[derive(Debug, Default)]
-pub struct InfectsCache {}
+pub struct InfectsCache {
+    expr_cache: FxHashMap<*const Expr, Arc<Set>>,
+}
 
 pub fn collect_infect_from_with_cache<N>(
     node: &N,
@@ -85,7 +91,8 @@ where
             track_expr_ident: true,
             ..Default::default()
         },
-        accesses: FxHashSet::default(),
+        accesses: Default::default(),
+        cache,
     };
 
     node.visit_with(&mut visitor);
@@ -111,7 +118,9 @@ pub struct InfectionCollector<'a> {
 
     ctx: Ctx,
 
-    accesses: FxHashSet<Access>,
+    accesses: Set,
+
+    cache: Option<&'a mut InfectsCache>,
 }
 
 impl InfectionCollector<'_> {
