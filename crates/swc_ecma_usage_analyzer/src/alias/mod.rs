@@ -54,13 +54,13 @@ pub enum AccessKind {
 
 pub type Access = (Id, AccessKind);
 
-#[derive(Default)]
-pub struct Cache {}
+#[derive(Debug, Default)]
+pub struct InfectsCache {}
 
 pub fn collect_infect_from_with_cache<N>(
     node: &N,
     config: AliasConfig,
-    cache: Option<&mut Cache>,
+    cache: Option<&mut InfectsCache>,
 ) -> FxHashSet<Access>
 where
     N: InfectableNode

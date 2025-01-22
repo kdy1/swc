@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use swc_common::{collections::AHashMap, SyntaxContext};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{
@@ -9,7 +11,7 @@ use swc_timer::timer;
 pub use self::ctx::Ctx;
 use self::storage::*;
 use crate::{
-    alias::{collect_infects_from, AliasConfig},
+    alias::{collect_infect_from_with_cache, AliasConfig, InfectsCache},
     marks::Marks,
     util::can_end_conditionally,
 };
@@ -40,6 +42,7 @@ where
             in_strict: false,
         },
         used_recursively: AHashMap::default(),
+        alias_cache: Default::default(),
     };
     n.visit_with(&mut v);
     let top_scope = v.scope;
@@ -74,6 +77,8 @@ where
     ctx: Ctx,
     expr_ctx: ExprCtx,
     used_recursively: AHashMap<Id, RecursiveUsage>,
+
+    alias_cache: Rc<RefCell<InfectsCache>>,
 }
 
 impl<S> UsageAnalyzer<S>
@@ -94,6 +99,7 @@ where
             expr_ctx: self.expr_ctx.clone(),
             scope: Default::default(),
             used_recursively: self.used_recursively.clone(),
+            alias_cache: self.alias_cache.clone(),
         };
 
         let ret = op(&mut child);
@@ -297,12 +303,13 @@ where
 
             if let Some(left) = left {
                 let mut v = None;
-                for id in collect_infects_from(
+                for id in collect_infect_from_with_cache(
                     &n.right,
                     AliasConfig {
                         marks: self.marks,
                         ..Default::default()
                     },
+                    Some(&mut self.alias_cache.borrow_mut()),
                 ) {
                     if v.is_none() {
                         v = Some(self.data.var_or_default(left.to_id()));
@@ -749,12 +756,13 @@ where
 
         {
             let mut v = None;
-            for id in collect_infects_from(
+            for id in collect_infect_from_with_cache(
                 &n.function,
                 AliasConfig {
                     marks: self.marks,
                     ..Default::default()
                 },
+                Some(&mut self.alias_cache.borrow_mut()),
             ) {
                 if v.is_none() {
                     v = Some(self.data.var_or_default(n.ident.to_id()));
@@ -779,12 +787,13 @@ where
 
             {
                 let mut v = None;
-                for id in collect_infects_from(
+                for id in collect_infect_from_with_cache(
                     &n.function,
                     AliasConfig {
                         marks: self.marks,
                         ..Default::default()
                     },
+                    Some(&mut self.alias_cache.borrow_mut()),
                 ) {
                     if v.is_none() {
                         v = Some(self.data.var_or_default(n_id.to_id()));
@@ -1276,12 +1285,13 @@ where
         for decl in &n.decls {
             if let (Pat::Ident(var), Some(init)) = (&decl.name, decl.init.as_deref()) {
                 let mut v = None;
-                for id in collect_infects_from(
+                for id in collect_infect_from_with_cache(
                     init,
                     AliasConfig {
                         marks: self.marks,
                         ..Default::default()
                     },
+                    Some(&mut self.alias_cache.borrow_mut()),
                 ) {
                     if v.is_none() {
                         v = Some(self.data.var_or_default(var.to_id()));
