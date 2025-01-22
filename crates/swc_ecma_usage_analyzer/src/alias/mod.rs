@@ -1,6 +1,6 @@
 #![allow(clippy::needless_update)]
 
-use std::sync::Arc;
+use std::{mem::take, rc::Rc};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use swc_common::{collections::AHashSet, SyntaxContext};
@@ -60,7 +60,7 @@ type Set = FxHashSet<Access>;
 
 #[derive(Debug, Default)]
 pub struct InfectsCache {
-    expr_cache: FxHashMap<*const Expr, Arc<Set>>,
+    expr_cache: FxHashMap<*const Expr, Rc<Set>>,
 }
 
 pub fn collect_infect_from_with_cache<N>(
@@ -213,6 +213,17 @@ impl Visit for InfectionCollector<'_> {
     }
 
     fn visit_expr(&mut self, e: &Expr) {
+        let mut old_accesses = None;
+
+        if let Some(cache) = &self.cache {
+            old_accesses = Some(take(&mut self.accesses));
+
+            if let Some(accesses) = cache.expr_cache.get(&(e as *const Expr)) {
+                self.accesses.extend(accesses.iter().cloned());
+                return;
+            }
+        }
+
         match e {
             Expr::Ident(i) => {
                 if self.ctx.track_expr_ident {
@@ -226,6 +237,16 @@ impl Visit for InfectionCollector<'_> {
                     ..self.ctx
                 };
                 e.visit_children_with(&mut *self.with_ctx(ctx));
+            }
+        }
+
+        if let Some(cache) = &mut self.cache {
+            cache
+                .expr_cache
+                .insert(e as *const Expr, Rc::new(self.accesses.clone()));
+
+            if let Some(old_accesses) = old_accesses {
+                self.accesses.extend(old_accesses);
             }
         }
     }
