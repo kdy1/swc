@@ -60,7 +60,7 @@ type Set = FxHashSet<Access>;
 
 #[derive(Debug, Default)]
 pub struct InfectsCache {
-    expr_cache: FxHashMap<*const Expr, Rc<Set>>,
+    fn_cache: FxHashMap<*const Function, Rc<Set>>,
 }
 
 pub fn collect_infect_from_with_cache<N>(
@@ -223,18 +223,32 @@ impl Visit for InfectionCollector<'_> {
         self.add_id(n.to_id());
     }
 
-    fn visit_expr(&mut self, e: &Expr) {
+    fn visit_function(&mut self, e: &Function) {
         let mut old_buffer = None;
 
         if let Some(cache) = &self.cache {
             old_buffer = Some(take(&mut self.buffer));
 
-            if let Some(accesses) = cache.expr_cache.get(&(e as *const Expr)) {
+            if let Some(accesses) = cache.fn_cache.get(&(e as *const Function)) {
                 self.accesses.push(accesses.clone());
                 return;
             }
         }
 
+        e.visit_children_with(self);
+
+        if let Some(cache) = &mut self.cache {
+            let buffer = Rc::new(take(&mut self.buffer));
+
+            cache.fn_cache.insert(e as *const Function, buffer.clone());
+
+            if let Some(old_buffer) = old_buffer {
+                self.buffer = old_buffer;
+            }
+        }
+    }
+
+    fn visit_expr(&mut self, e: &Expr) {
         match e {
             Expr::Ident(i) => {
                 if self.ctx.track_expr_ident {
@@ -248,16 +262,6 @@ impl Visit for InfectionCollector<'_> {
                     ..self.ctx
                 };
                 e.visit_children_with(&mut *self.with_ctx(ctx));
-            }
-        }
-
-        if let Some(cache) = &mut self.cache {
-            let buffer = Rc::new(take(&mut self.buffer));
-
-            cache.expr_cache.insert(e as *const Expr, buffer.clone());
-
-            if let Some(old_buffer) = old_buffer {
-                self.buffer = old_buffer;
             }
         }
     }
