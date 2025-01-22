@@ -227,12 +227,12 @@ impl Visit for InfectionCollector<'_> {
         let mut old_buffer = None;
 
         if let Some(cache) = &self.cache {
-            old_buffer = Some(take(&mut self.buffer));
-
             if let Some(accesses) = cache.fn_cache.get(&(e as *const Function)) {
                 self.accesses.push(accesses.clone());
                 return;
             }
+
+            old_buffer = Some(take(&mut self.buffer));
         }
 
         e.visit_children_with(self);
@@ -241,10 +241,10 @@ impl Visit for InfectionCollector<'_> {
             let buffer = Rc::new(take(&mut self.buffer));
 
             cache.fn_cache.insert(e as *const Function, buffer.clone());
+        }
 
-            if let Some(old_buffer) = old_buffer {
-                self.buffer = old_buffer;
-            }
+        if let Some(old_buffer) = old_buffer {
+            self.buffer = old_buffer;
         }
     }
 
