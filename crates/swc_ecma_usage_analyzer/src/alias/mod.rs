@@ -54,7 +54,14 @@ pub enum AccessKind {
 
 pub type Access = (Id, AccessKind);
 
-pub fn collect_infects_from<N>(node: &N, config: AliasConfig) -> FxHashSet<Access>
+#[derive(Default)]
+pub struct Cache {}
+
+pub fn collect_infect_from_with_cache<N>(
+    node: &N,
+    config: AliasConfig,
+    cache: Option<&mut Cache>,
+) -> FxHashSet<Access>
 where
     N: InfectableNode
         + VisitWith<BindingCollector<Id>>
@@ -84,6 +91,15 @@ where
     node.visit_with(&mut visitor);
 
     visitor.accesses
+}
+
+pub fn collect_infects_from<N>(node: &N, config: AliasConfig) -> FxHashSet<Access>
+where
+    N: InfectableNode
+        + VisitWith<BindingCollector<Id>>
+        + for<'aa> VisitWith<InfectionCollector<'aa>>,
+{
+    collect_infect_from_with_cache(node, config, None)
 }
 
 pub struct InfectionCollector<'a> {
