@@ -92,12 +92,21 @@ where
             ..Default::default()
         },
         accesses: Default::default(),
+        buffer: Default::default(),
         cache,
     };
 
     node.visit_with(&mut visitor);
 
-    visitor.accesses
+    let rc = Rc::new(take(&mut visitor.buffer));
+    visitor.accesses.push(rc);
+
+    let mut result = FxHashSet::default();
+    for v in visitor.accesses {
+        result.extend(v.iter().cloned());
+    }
+
+    result
 }
 
 pub fn collect_infects_from<N>(node: &N, config: AliasConfig) -> FxHashSet<Access>
@@ -118,7 +127,9 @@ pub struct InfectionCollector<'a> {
 
     ctx: Ctx,
 
-    accesses: Set,
+    accesses: Vec<Rc<Set>>,
+
+    buffer: Set,
 
     cache: Option<&'a mut InfectsCache>,
 }
@@ -133,7 +144,7 @@ impl InfectionCollector<'_> {
             return;
         }
 
-        self.accesses.insert((
+        self.buffer.insert((
             e,
             if self.ctx.is_callee {
                 AccessKind::Call
@@ -213,13 +224,13 @@ impl Visit for InfectionCollector<'_> {
     }
 
     fn visit_expr(&mut self, e: &Expr) {
-        let mut old_accesses = None;
+        let mut old_buffer = None;
 
         if let Some(cache) = &self.cache {
-            old_accesses = Some(take(&mut self.accesses));
+            old_buffer = Some(take(&mut self.buffer));
 
             if let Some(accesses) = cache.expr_cache.get(&(e as *const Expr)) {
-                self.accesses.extend(accesses.iter().cloned());
+                self.accesses.push(accesses.clone());
                 return;
             }
         }
@@ -241,12 +252,12 @@ impl Visit for InfectionCollector<'_> {
         }
 
         if let Some(cache) = &mut self.cache {
-            cache
-                .expr_cache
-                .insert(e as *const Expr, Rc::new(self.accesses.clone()));
+            let buffer = Rc::new(take(&mut self.buffer));
 
-            if let Some(old_accesses) = old_accesses {
-                self.accesses.extend(old_accesses);
+            cache.expr_cache.insert(e as *const Expr, buffer.clone());
+
+            if let Some(old_buffer) = old_buffer {
+                self.buffer = old_buffer;
             }
         }
     }
