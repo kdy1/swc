@@ -241,6 +241,7 @@ impl Visit for InfectionCollector<'_> {
             let buffer = Rc::new(take(&mut self.buffer));
 
             cache.fn_cache.insert(e as *const Function, buffer.clone());
+            self.accesses.push(buffer);
         }
 
         if let Some(old_buffer) = old_buffer {
