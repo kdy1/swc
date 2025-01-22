@@ -100,11 +100,11 @@ pub struct InfectionCollector<'a> {
 
 impl InfectionCollector<'_> {
     fn add_id(&mut self, e: Id) {
-        if self.exclude.contains(&e) {
+        if self.unresolved_ctxt == Some(e.1) && is_global_var_with_pure_property_access(&e.0) {
             return;
         }
 
-        if self.unresolved_ctxt == Some(e.1) && is_global_var_with_pure_property_access(&e.0) {
+        if self.exclude.contains(&e) {
             return;
         }
 
