@@ -8,8 +8,26 @@ pub struct EstreeProgram {
 }
 
 #[napi]
+impl EstreeProgram {
+    #[napi]
+    pub fn as_script(
+        &self,
+        env: Env,
+        reference: Reference<EstreeProgram>,
+    ) -> Result<Option<EstreeScript>> {
+        let Some(..) = self.inner.as_script() else {
+            return Ok(None);
+        };
+
+        let inner = reference.share_with(env, |program| Ok(program.inner.as_script().unwrap()))?;
+
+        Ok(Some(EstreeScript { inner }))
+    }
+}
+
+#[napi]
 pub struct EstreeScript {
-    inner: SharedReference<EstreeProgram, Script>,
+    inner: SharedReference<EstreeProgram, &'static Script>,
 }
 
 #[napi]
