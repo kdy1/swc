@@ -15,7 +15,7 @@ pub struct EstreeScript {
 #[napi]
 impl EstreeScript {
     #[napi(getter)]
-    pub fn stmts(&self, env: Env) -> Result<EstreeStatements> {
+    pub fn body(&self, env: Env) -> Result<EstreeStatements> {
         Ok(EstreeStatements {
             inner: self
                 .inner
