@@ -14,8 +14,8 @@ pub struct JsScript {
 
 #[napi]
 impl JsScript {
-    #[napi]
-    pub fn get_stmts(&self, env: Env) -> Result<JsStmts> {
+    #[napi(getter)]
+    pub fn stmts(&self, env: Env) -> Result<JsStmts> {
         Ok(JsStmts {
             inner: self
                 .inner
