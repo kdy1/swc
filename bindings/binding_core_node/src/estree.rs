@@ -32,8 +32,8 @@ pub struct EstreeStatements {
 
 #[napi]
 impl EstreeStatements {
-    #[napi]
-    pub fn len(&self) -> u32 {
+    #[napi(getter)]
+    pub fn length(&self) -> u32 {
         self.inner.len() as u32
     }
 
