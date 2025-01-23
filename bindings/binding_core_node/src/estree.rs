@@ -15,10 +15,12 @@ pub struct JsScript {
 #[napi]
 impl JsScript {
     #[napi]
-    pub fn stmts(&self, reference: Reference<JsProgram>, env: Env) -> Result<JsStmts> {
+    pub fn stmts(&self, env: Env) -> Result<JsStmts> {
         Ok(JsStmts {
-            inner: reference
-                .share_with(env, |program| Ok(&*program.inner.as_script().unwrap().body))?,
+            inner: self
+                .inner
+                .clone(env)?
+                .share_with(env, |script| Ok(&*script.body))?,
         })
     }
 }
