@@ -14,8 +14,8 @@ pub struct EstreeScript {
 
 #[napi]
 impl EstreeScript {
-    #[napi(getter)]
-    pub fn body(&self, env: Env) -> Result<EstreeStatements> {
+    #[napi]
+    pub fn get_body(&self, env: Env) -> Result<EstreeStatements> {
         Ok(EstreeStatements {
             inner: self
                 .inner
