@@ -31,6 +31,24 @@ pub struct EstreeStatements {
 }
 
 #[napi]
+impl EstreeStatements {
+    #[napi]
+    pub fn len(&self) -> u32 {
+        self.inner.len() as u32
+    }
+
+    #[napi]
+    pub fn get(&self, index: u32, env: Env) -> Result<EstreeStatement> {
+        Ok(EstreeStatement {
+            inner: self
+                .inner
+                .clone(env)?
+                .share_with(env, |stmts| Ok(&stmts[index as usize]))?,
+        })
+    }
+}
+
+#[napi]
 pub struct EstreeStatement {
-    inner: SharedReference<EstreeProgram, Stmt>,
+    inner: SharedReference<EstreeProgram, &'static Stmt>,
 }
