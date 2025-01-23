@@ -3,20 +3,20 @@ use napi_derive::napi;
 use swc_core::ecma::ast::{Program, Script, Stmt};
 
 #[napi]
-pub struct JsProgram {
+pub struct EstreeProgram {
     inner: Program,
 }
 
 #[napi]
-pub struct JsScript {
-    inner: SharedReference<JsProgram, Script>,
+pub struct EstreeScript {
+    inner: SharedReference<EstreeProgram, Script>,
 }
 
 #[napi]
-impl JsScript {
+impl EstreeScript {
     #[napi(getter)]
-    pub fn stmts(&self, env: Env) -> Result<JsStmts> {
-        Ok(JsStmts {
+    pub fn stmts(&self, env: Env) -> Result<EstreeStatements> {
+        Ok(EstreeStatements {
             inner: self
                 .inner
                 .clone(env)?
@@ -26,11 +26,11 @@ impl JsScript {
 }
 
 #[napi]
-pub struct JsStmts {
-    inner: SharedReference<JsProgram, &'static [Stmt]>,
+pub struct EstreeStatements {
+    inner: SharedReference<EstreeProgram, &'static [Stmt]>,
 }
 
 #[napi]
-pub struct JsStmt {
-    inner: SharedReference<JsProgram, Stmt>,
+pub struct EstreeStatement {
+    inner: SharedReference<EstreeProgram, Stmt>,
 }
