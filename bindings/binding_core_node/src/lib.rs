@@ -15,6 +15,7 @@ use swc_core::{
 };
 
 mod bundle;
+mod estree;
 mod minify;
 mod parse;
 mod print;
