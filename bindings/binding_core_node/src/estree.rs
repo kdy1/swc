@@ -1,6 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use swc_core::ecma::ast::{Program, Script, Stmt};
+use swc_core::ecma::ast::{ExprStmt, Program, Script, Stmt};
 
 #[napi]
 pub struct EstreeProgram {
@@ -69,4 +69,26 @@ impl EstreeStatements {
 #[napi]
 pub struct EstreeStatement {
     inner: SharedReference<EstreeProgram, &'static Stmt>,
+}
+
+#[napi]
+impl EstreeStatement {
+    #[napi]
+    pub fn as_expression_statement(&self, env: Env) -> Result<Option<EstreeExpressionStatement>> {
+        if !self.inner.is_expr() {
+            return Ok(None);
+        }
+
+        let inner = self
+            .inner
+            .clone(env)?
+            .share_with(env, |stmt| Ok(stmt.as_expr().unwrap()))?;
+
+        Ok(Some(EstreeExpressionStatement { inner }))
+    }
+}
+
+#[napi]
+pub struct EstreeExpressionStatement {
+    inner: SharedReference<EstreeProgram, &'static ExprStmt>,
 }
